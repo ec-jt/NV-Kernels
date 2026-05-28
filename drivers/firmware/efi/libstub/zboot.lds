@@ -61,3 +61,16 @@ PROVIDE(__efistub__gzdata_size =
 PROVIDE(__data_rawsize = ABSOLUTE(_edata - _data));
 PROVIDE(__data_size = ABSOLUTE(_end - _data));
 PROVIDE(__sbat_size = ABSOLUTE(_esbat - _sbat));
+
+/*
+ * arm64 DRTM/Secure Launch (ARM64_SECURE_LAUNCH) references these symbols
+ * via __efistub_ aliases in image-vars.h.  In the zboot context sl_entry
+ * lives in the uncompressed kernel image and is not accessible here, so
+ * DRTM is unsupported via the compressed boot path.  The Kconfig dependency
+ * "depends on !EFI_ZBOOT" prevents both from being enabled simultaneously.
+ * These stubs exist only as a safety net for misconfigured builds.
+ */
+PROVIDE_HIDDEN(__efistub__text    = ADDR(.head));
+PROVIDE_HIDDEN(__efistub__end     = _end);
+PROVIDE_HIDDEN(__efistub__edata   = _edata);
+PROVIDE_HIDDEN(__efistub_sl_entry = ADDR(.head));

@@ -2427,7 +2427,8 @@ config EFI
 config ARM64_SECURE_LAUNCH
 	bool "ARM64 DRTM Secure Launch support"
 	depends on ARM64 && EFI
-	default n
+	depends on !EFI_ZBOOT
+	default y
 	help
 	  Enable support for ARM DRTM (Dynamic Root of Trust for Measurement)
 	  Secure Launch. When enabled, the kernel can act as a DLME, receiving
