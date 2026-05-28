@@ -363,6 +363,11 @@ efi_status_t efi_boot_kernel(void *handle, efi_loaded_image_t *image,
 	if (IS_ENABLED(CONFIG_ARM))
 		efi_handle_post_ebs_state();
 
+#ifdef CONFIG_ARM64_SECURE_LAUNCH
+	if (efi_slaunch_enabled(cmdline_ptr))
+		efi_slaunch_drtm(kernel_addr, fdt_addr);
+#endif
+
 	efi_enter_kernel(kernel_addr, fdt_addr, fdt_totalsize((void *)fdt_addr));
 	/* not reached */
 }
