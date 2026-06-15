@@ -86,6 +86,29 @@ static inline bool lab_bridge_target(struct pci_dev *dev)
 	return true;
 }
 
+/*
+	* lab_np_floor_target - does this bridge need alignment-aware NP sizing?
+	*
+	* Matches AMD GPP root ports fronting Switchtec subtrees, plus all
+	* Switchtec upstream/downstream ports.  These are the bridges where
+	* the standard size += max(r_size, align) accumulation underestimates
+	* bus NP window size because it ignores inter-child alignment gaps.
+	*/
+static bool lab_np_floor_target(struct pci_dev *dev)
+{
+	/* AMD GPP RPs that front a Switchtec subtree */
+	if (lab_bridge_target(dev))
+		return true;
+	/* Switchtec upstream and downstream ports */
+	if (dev && dev->vendor == PCI_VENDOR_ID_MICROSEMI) {
+		u8 type = pci_pcie_type(dev);
+		if (type == PCI_EXP_TYPE_UPSTREAM ||
+		    type == PCI_EXP_TYPE_DOWNSTREAM)
+			return true;
+	}
+	return false;
+}
+
 struct pci_dev_resource {
 	struct list_head list;
 	struct resource *res;
@@ -1339,10 +1362,14 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 
 	/*
 	 * Lab override: release firmware-assigned NP MEM window on
-	 * lab bridges so we can re-size it (release BEFORE assigned check).
+	 * lab bridges AND Switchtec ports so we can re-size it
+	 * (release BEFORE assigned check).  Switchtec windows also
+	 * get released here because a parent lab bridge may have
+	 * already released them via release_child_resources, and we
+	 * need to propagate the re-sizing.
 	 */
 	if (bus->self &&
-	    lab_bridge_target(bus->self) &&
+	    lab_np_floor_target(bus->self) &&
 	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW] &&
 	    resource_assigned(b_res)) {
 		pci_info(bus->self,
@@ -1354,8 +1381,12 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 	}
 
 	/* If resource is already assigned, nothing more to do */
-	if (resource_assigned(b_res))
+	if (resource_assigned(b_res)) {
+		if (bus->self)
+			pci_dbg(bus->self, "NP MEM %pR already assigned, skipping size\n",
+				b_res);
 		return;
+	}
 
 	max_order = 0;
 	size = 0;
@@ -1413,7 +1444,7 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 	 * Lab override: enforce 96 MiB NP floor on lab bridges.
 	 */
 	if (bus->self &&
-	    lab_bridge_target(bus->self) &&
+	    lab_np_floor_target(bus->self) &&
 	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW]) {
 		resource_size_t floor_np = 96ULL << 20;
 
@@ -1427,6 +1458,63 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 			 (unsigned long long)(floor_np >> 20),
 			 (unsigned long long)(size0 >> 20),
 			 (unsigned long long)(size1 >> 20));
+	}
+
+	/*
+	 * Lab override: alignment-aware NP floor for bridges in the
+	 * Switchtec subtree.  The standard size += max(r_size, align)
+	 * loop underestimates the NP window because it ignores
+	 * inter-child alignment gaps.  Walk child bridge NP windows
+	 * and compute sequential packing: ALIGN(floor, align) + size.
+	 *
+	 * Two 65 MiB child windows with 64 MiB alignment need
+	 * ~193 MiB, not 130 MiB.
+	 */
+	if (bus->self &&
+	    lab_np_floor_target(bus->self) &&
+	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW]) {
+		resource_size_t np_child_floor = 0;
+		struct pci_dev *child;
+
+		list_for_each_entry(child, &bus->devices, bus_list) {
+			struct resource *cr;
+			int j;
+
+			pci_dev_for_each_resource(child, cr, j) {
+				resource_size_t child_align, child_size;
+
+				if (!pci_resource_is_bridge_win(j))
+					continue;
+				if (cr->flags & IORESOURCE_PREFETCH)
+					continue;
+				if (!(cr->flags & IORESOURCE_MEM))
+					continue;
+				if (cr->flags & IORESOURCE_DISABLED)
+					continue;
+				child_align = pci_resource_alignment(child, cr);
+				child_size = resource_size(cr);
+				if (realloc_head)
+					child_size += get_res_add_size(realloc_head, cr);
+				np_child_floor = ALIGN(np_child_floor, child_align) +
+						 child_size;
+			}
+		}
+
+		if (np_child_floor > 0) {
+			if (size0 < np_child_floor)
+				size0 = np_child_floor;
+			if (size1 < np_child_floor)
+				size1 = np_child_floor;
+			/* Update base size so size1 recalculation stays consistent */
+			if (size < np_child_floor)
+				size = np_child_floor;
+			add_align = max(add_align, min_align);
+			pci_info(bus->self,
+				 "NP child-align floor %llu MiB; sized %llu/%llu MiB\n",
+				 (unsigned long long)(np_child_floor >> 20),
+				 (unsigned long long)(size0 >> 20),
+				 (unsigned long long)(size1 >> 20));
+		}
 	}
 
 	/*
@@ -2078,13 +2166,22 @@ static void pci_bus_distribute_available_resources(struct pci_bus *bus,
 		    res != &bridge->resource[PCI_BRIDGE_MEM_WINDOW]) {
 			adjust_bridge_window(bridge, res, add_list,
 					     resource_size(&available[i]));
+			pci_dbg(bridge, "distribute: adjust window %pR to %llu MiB\n",
+				res,
+				(unsigned long long)(resource_size(&available[i]) >> 20));
 		} else {
 			resource_size_t cur = resource_size(res);
 			resource_size_t want = resource_size(&available[i]);
 
-			if (want > cur)
+			pci_dbg(bridge, "distribute: NP cur=%llu MiB want=%llu MiB\n",
+				(unsigned long long)(cur >> 20),
+				(unsigned long long)(want >> 20));
+			if (want > cur) {
 				adjust_bridge_window(bridge, res, add_list,
 						     want);
+				pci_dbg(bridge, "distribute: grew NP to %llu MiB\n",
+					(unsigned long long)(want >> 20));
+			}
 		}
 	}
 

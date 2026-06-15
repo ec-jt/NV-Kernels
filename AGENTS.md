@@ -27,10 +27,37 @@ PCIe fabric. There are two cooperating pieces:
 2. **`drivers/pci/setup-bus.c`**
    - `lab_bridge_target()` — identifies the AMD GPP root ports that front the
      Switchtec subtree (gated by DMI vendor = GIGABYTE).
-   - In `pbus_size_mem()`: releases the firmware-assigned NP window so it can be
-     re-sized, and enforces a **96 MiB NP floor** on lab bridges.
+   - `lab_np_floor_target()` — same as above, plus Switchtec upstream and
+     downstream ports.  Used for NP window release and floor enforcement across
+     the entire Switchtec subtree, not just the AMD GPP root port.
+   - In `pbus_size_mem()`: releases the firmware-assigned NP window on ALL
+     `lab_np_floor_target()` bridges so they can be re-sized; enforces a
+     **96 MiB NP floor** per DSP; computes an **alignment-aware NP child bridge
+     floor** (`ALIGN(floor, child_align) + child_size`) to account for
+     inter-child alignment gaps that the standard accumulation misses.
    - In `pci_bus_distribute_available_resources()`: "grow but never shrink" the
      NP MEM window on lab bridges.
+
+3. **NP Alignment Gap Fix** (added 2025-06-15)
+   - The 6.9 kernel relied on `calculate_memsize(old_size)` to preserve
+     firmware-assigned window sizes (192 MiB).  The 7.0 port lost this
+     parameter, so after `release_child_resources()` wiped the hierarchy the
+     standard `size += max(r_size, align)` loop underestimated NP windows:
+     two 65 MiB children with 64 MiB alignment computed 130 MiB, but the
+     alignment gap between them required ~193 MiB.
+   - **Fix**: post-accumulation NP child bridge floor that walks child bridge
+     windows with sequential packing (`ALIGN(floor, al...ign) + size`) as a
+     clamp, not in the primary accumulation loop.  This is safe — the same
+     pattern is already used for the prefetchable floor.
+   - **Result**: AMD GPP RPs get 224 MiB NP (matching 6.9), Switchtec USPs get
+     192 MiB, and all DSPs get 96 MiB — enough for 2 GPUs per switch.
+   - **Scalability**: this approach scales automatically — add more GPUs per
+     Switchtec switch and the child-align floor grows accordingly.  The
+     practical limit is the AMD host bridge NP MMIO aperture, not the kernel
+     sizing logic.  To add more GPUs, add more Switchtec switches behind
+     unused AMD GPP root ports and set `CONFIG_PCI_REALLOC_ENABLE_AUTO=y`
+     (or boot with `pci=realloc`).  The existing 8-GPU config leaves ~512 MiB
+     NP headroom per root complex; more GPUs would need more root ports.
 
 ---
 
@@ -61,6 +88,12 @@ size += max(r_size, align);
 > RULE: Do not reintroduce the `ALIGN(size, align) + r_size` accumulation
 > without a full boot test. If sibling alignment waste needs accounting, do it
 > in `calculate_memsize()` / window alignment, not in the per-resource sum.
+>
+> **Allowed exception**: `ALIGN(floor, align) + size` is safe when used as a
+> **post-computation floor** (clamp, not accumulation loop). This pattern is
+> used in the NP child-align floor (§1.3) and the prefetchable floor. Both
+> compute a floor value from child bridge windows after the primary accumulation
+> loop and only clamp `size0`/`size1` up — they never drive the accumulation.
 
 ---
 
@@ -272,7 +305,20 @@ nvidia-smi --query-gpu=name --format=csv,noheader | wc -l  # == GPU count
 
 ---
 
-## 8. NVIDIA Device ID Coverage (quirk_presize_rebar)
+## 8. Key Functions Reference
+
+| Function | File | Purpose |
+|----------|------|---------|
+| `lab_bridge_target()` | setup-bus.c | AMD GPP RPs with Switchtec below |
+| `lab_np_floor_target()` | setup-bus.c | `lab_bridge_target()` + Switchtec USP/DSP |
+| `lab_np_target()` | quirks.c | Device match against `lab_match_tbl[]` |
+| `quirk_presize_rebar_nvidia_gb202()` | quirks.c | Pre-size GPU BAR1 ReBAR |
+| `quirk_lab_free_np_early()` | quirks.c | Zero BARs / disable decode (EARLY) |
+| `quirk_lab_free_np_header()` | quirks.c | Nuke kernel-side resource flags (HEADER) |
+
+---
+
+## 9. NVIDIA Device ID Coverage (quirk_presize_rebar)
 
 | GPU | PCI ID | Status |
 |-----|--------|--------|
