@@ -29,6 +29,7 @@
 #include <linux/sizes.h>
 #include <linux/slab.h>
 #include <linux/acpi.h>
+#include <linux/dmi.h>
 #include "pci.h"
 
 #define PCI_RES_TYPE_MASK \
@@ -37,6 +38,53 @@
 
 unsigned int pci_flags;
 EXPORT_SYMBOL_GPL(pci_flags);
+
+/* Lab: identify target bridges — DMI Gigabyte + Switchtec subtree scan */
+static bool lab_platform_ok(void)
+{
+#ifdef CONFIG_DMI
+	static const struct dmi_system_id lab_dmi[] = {
+		{ .matches = { DMI_MATCH(DMI_SYS_VENDOR, "GIGABYTE"), } },
+		{ }
+	};
+	return dmi_check_system(lab_dmi);
+#else
+	return false;
+#endif
+}
+
+static bool bus_has_vendor_device(struct pci_bus *bus, u16 vendor, u16 device)
+{
+	struct pci_dev *d;
+
+	list_for_each_entry(d, &bus->devices, bus_list) {
+		if (d->vendor == vendor && d->device == device)
+			return true;
+		if (d->subordinate &&
+		    bus_has_vendor_device(d->subordinate, vendor, device))
+			return true;
+	}
+	return false;
+}
+
+/* Target only AMD GPP RPs that front GPU/Switchtec fabric */
+static inline bool lab_bridge_target(struct pci_dev *dev)
+{
+	if (!dev)
+		return false;
+	if (!lab_platform_ok())
+		return false;
+	if (!dev->subordinate)
+		return false;
+	if (!bus_has_vendor_device(dev->subordinate,
+				   PCI_VENDOR_ID_MICROSEMI, 0x4052))
+		return false;
+
+	pci_info(dev, "LAB: targeting bridge %04x:%02x:%02x.%d (Switchtec subtree)\n",
+		 pci_domain_nr(dev->bus), dev->bus->number,
+		 PCI_SLOT(dev->devfn), PCI_FUNC(dev->devfn));
+	return true;
+}
 
 struct pci_dev_resource {
 	struct list_head list;
@@ -1289,6 +1337,22 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 	if (!b_res)
 		return;
 
+	/*
+	 * Lab override: release firmware-assigned NP MEM window on
+	 * lab bridges so we can re-size it (release BEFORE assigned check).
+	 */
+	if (bus->self &&
+	    lab_bridge_target(bus->self) &&
+	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW] &&
+	    resource_assigned(b_res)) {
+		pci_info(bus->self,
+			 "releasing firmware-assigned NP MEM window %pR to re-size\n",
+			 b_res);
+		release_child_resources(b_res);
+		if (!release_resource(b_res))
+			pci_dbg(bus->self, "released existing window\n");
+	}
+
 	/* If resource is already assigned, nothing more to do */
 	if (resource_assigned(b_res))
 		return;
@@ -1344,6 +1408,26 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 	min_align = max(min_align, win_align);
 	size0 = calculate_memsize(size, realloc_head ? 0 : add_size,
 				  0, win_align);
+
+	/*
+	 * Lab override: enforce 96 MiB NP floor on lab bridges.
+	 */
+	if (bus->self &&
+	    lab_bridge_target(bus->self) &&
+	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW]) {
+		resource_size_t floor_np = 96ULL << 20;
+
+		if (size0 < floor_np)
+			size0 = floor_np;
+		if (size1 < floor_np)
+			size1 = floor_np;
+		add_align = max(add_align, min_align);
+		pci_info(bus->self,
+			 "NP window floor %llu MiB; sized %llu/%llu MiB\n",
+			 (unsigned long long)(floor_np >> 20),
+			 (unsigned long long)(size0 >> 20),
+			 (unsigned long long)(size1 >> 20));
+	}
 
 	if (size0) {
 		resource_set_range(b_res, min_align, size0);
@@ -1936,9 +2020,21 @@ static void pci_bus_distribute_available_resources(struct pci_bus *bus,
 		 * Now that we have adjusted for alignment, update the
 		 * bridge window resources to fill as much remaining
 		 * resource space as possible.
+		 *
+		 * Lab override: grow but never shrink NP MEM on lab bridges.
 		 */
-		adjust_bridge_window(bridge, res, add_list,
-				     resource_size(&available[i]));
+		if (!lab_bridge_target(bridge) ||
+		    res != &bridge->resource[PCI_BRIDGE_MEM_WINDOW]) {
+			adjust_bridge_window(bridge, res, add_list,
+					     resource_size(&available[i]));
+		} else {
+			resource_size_t cur = resource_size(res);
+			resource_size_t want = resource_size(&available[i]);
+
+			if (want > cur)
+				adjust_bridge_window(bridge, res, add_list,
+						     want);
+		}
 	}
 
 	/*

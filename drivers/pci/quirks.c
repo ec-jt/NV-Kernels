@@ -5769,6 +5769,146 @@ bool pci_dev_specific_ats_always_on(struct pci_dev *pdev)
 }
 #endif /* CONFIG_PCI_ATS */
 
+/*
+ * Pre-size ReBAR for NVIDIA GB202 (RTX 5090) and AD102 (RTX 4090)
+ * so bridge sizing sees the full framebuffer aperture (BAR1).
+ *
+ * 7.0: pci_rebar_init() must be called explicitly before rebar functions.
+ *      sizes is now u64 — use BIT_ULL().
+ */
+static void quirk_presize_rebar_nvidia_gb202(struct pci_dev *dev)
+{
+	int bar = 1, idx, max = 15;
+	u64 sizes;
+
+	if (PCI_FUNC(dev->devfn) != 0)
+		return;
+	if (!pci_is_pcie(dev))
+		return;
+	if (!pci_find_ext_capability(dev, PCI_EXT_CAP_ID_REBAR))
+		return;
+	pci_rebar_init(dev);
+
+	sizes = pci_rebar_get_possible_sizes(dev, bar);
+	if (!sizes)
+		return;
+
+	for (idx = min(31, max); idx >= 0; idx--)
+		if (sizes & BIT_ULL(idx))
+			break;
+	if (idx < 0)
+		return;
+
+	if (!pci_rebar_set_size(dev, bar, idx))
+		pci_info(dev, "Pre-sized ReBAR on BAR%d to index %d\n", bar, idx);
+}
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2b85, quirk_presize_rebar_nvidia_gb202);
+DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2b85, quirk_presize_rebar_nvidia_gb202);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2684, quirk_presize_rebar_nvidia_gb202);
+DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2684, quirk_presize_rebar_nvidia_gb202);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2b87, quirk_presize_rebar_nvidia_gb202);
+DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2b87, quirk_presize_rebar_nvidia_gb202);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2b8f, quirk_presize_rebar_nvidia_gb202);
+DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2b8f, quirk_presize_rebar_nvidia_gb202);
+
+/*
+ * LAB: free 32-bit NP budget ASAP (EARLY + HEADER)
+ *
+ * Match table built from lspci -nnvv:
+ *  - ASM1042A xHCI          [1b21:1142]
+ *  - AMD xHCI               [1022:148c]   (class 0c0330)
+ *  - Switchtec mgmt (mem)   [11f8:4052]   (class 0580)
+ *  - AMD SATA AHCI          [1022:7901]   (class 0106)
+ *  - ASPEED BMC VGA         [1a03:2000]
+ *
+ * Plus fallbacks for "any xHCI" and "any AHCI" by class.
+ */
+enum lab_dev_tag {
+	LAB_DEV_ANY = 0,
+	LAB_DEV_BMC_VGA_ASPEED,
+	LAB_DEV_USB_ASM1042A,
+	LAB_DEV_USB_XHCI_AMD,
+	LAB_DEV_SWITCHTEC_MGMT,
+	LAB_DEV_SATA_AHCI_AMD,
+	LAB_DEV_USB_XHCI_ANY,
+};
+static const struct pci_device_id lab_match_tbl[] = {
+	/* Keep AST BMC VGA alive for boot debugging — do NOT free its BARs */
+	/* { PCI_DEVICE(0x1a03,   0x2000), .driver_data = LAB_DEV_BMC_VGA_ASPEED }, */
+	{ PCI_DEVICE(PCI_VENDOR_ID_ASMEDIA,  0x1142), .driver_data = LAB_DEV_USB_ASM1042A },
+	{ PCI_DEVICE(PCI_VENDOR_ID_AMD,      0x148c), .driver_data = LAB_DEV_USB_XHCI_AMD },
+	{ PCI_DEVICE(PCI_VENDOR_ID_MICROSEMI,0x4052), .driver_data = LAB_DEV_SWITCHTEC_MGMT },
+	{ PCI_VENDOR_ID_MICROSEMI, PCI_ANY_ID, PCI_ANY_ID, PCI_ANY_ID,
+	  (PCI_CLASS_MEMORY_OTHER << 8), 0xFFFF00, .driver_data = LAB_DEV_SWITCHTEC_MGMT },
+	{ PCI_DEVICE(PCI_VENDOR_ID_AMD,      0x7901), .driver_data = LAB_DEV_SATA_AHCI_AMD },
+	{ PCI_DEVICE_CLASS((PCI_CLASS_STORAGE_SATA_AHCI << 8), ~0),
+	  .driver_data = LAB_DEV_SATA_AHCI_AMD },
+	{ PCI_DEVICE_CLASS((PCI_CLASS_SERIAL_USB_XHCI << 8), ~0),
+	  .driver_data = LAB_DEV_USB_XHCI_ANY },
+	{ 0, }
+};
+
+static bool lab_np_target(struct pci_dev *d)
+{
+	const struct pci_device_id *id = pci_match_id(lab_match_tbl, d);
+
+	if (id)
+		pci_info(d, "LAB: matched NP target (vendor=%04x device=%04x class=%06x tag=%lu)\n",
+			 d->vendor, d->device, d->class >> 8, id->driver_data);
+	return id != NULL;
+}
+
+static void quirk_lab_free_np_early(struct pci_dev *dev)
+{
+	u16 cmd;
+	int i;
+
+	if (!lab_np_target(dev))
+		return;
+
+	pci_read_config_word(dev, PCI_COMMAND, &cmd);
+	if (cmd & (PCI_COMMAND_IO | PCI_COMMAND_MEMORY)) {
+		pci_info(dev, "LAB: EARLY disable IO/MEM decode for NP relief\n");
+		cmd &= ~(PCI_COMMAND_MASTER | PCI_COMMAND_IO | PCI_COMMAND_MEMORY);
+		pci_write_config_word(dev, PCI_COMMAND, cmd);
+	}
+
+	for (i = 0; i < PCI_STD_NUM_BARS; i++) {
+		u32 bar;
+
+		pci_read_config_dword(dev, PCI_BASE_ADDRESS_0 + 4 * i, &bar);
+		if (!bar)
+			continue;
+		pci_write_config_dword(dev, PCI_BASE_ADDRESS_0 + 4 * i, 0);
+		if ((bar & PCI_BASE_ADDRESS_SPACE) == PCI_BASE_ADDRESS_SPACE_MEMORY &&
+		    (bar & PCI_BASE_ADDRESS_MEM_TYPE_MASK) == PCI_BASE_ADDRESS_MEM_TYPE_64) {
+			i++;
+			pci_write_config_dword(dev, PCI_BASE_ADDRESS_0 + 4 * i, 0);
+		}
+	}
+	pci_write_config_dword(dev, PCI_ROM_ADDRESS, 0);
+}
+DECLARE_PCI_FIXUP_EARLY(PCI_ANY_ID, PCI_ANY_ID, quirk_lab_free_np_early);
+
+static void quirk_lab_free_np_header(struct pci_dev *dev)
+{
+	int i;
+
+	if (!lab_np_target(dev))
+		return;
+
+	for (i = 0; i < PCI_STD_NUM_BARS; i++) {
+		struct resource *r = &dev->resource[i];
+
+		if (r->flags & (IORESOURCE_MEM | IORESOURCE_IO)) {
+			r->start = 0;
+			r->end = 0;
+			r->flags = 0;
+		}
+	}
+}
+DECLARE_PCI_FIXUP_HEADER(PCI_ANY_ID, PCI_ANY_ID, quirk_lab_free_np_header);
+
 /* Freescale PCIe doesn't support MSI in RC mode */
 static void quirk_fsl_no_msi(struct pci_dev *pdev)
 {
