@@ -1429,6 +1429,57 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 			 (unsigned long long)(size1 >> 20));
 	}
 
+	/*
+	 * Lab override: enforce prefetchable window floor on lab bridges
+	 * to account for sibling alignment waste.  Two 32GB-aligned
+	 * GPU BAR1 apertures need sequential ALIGN to avoid cross-sibling
+	 * alignment collisions (e.g. ~96GB for two 32GB children).
+	 */
+	if (bus->self &&
+	    lab_bridge_target(bus->self) &&
+	    b_res == &bus->self->resource[PCI_BRIDGE_PREF_MEM_WINDOW]) {
+		resource_size_t pref_floor = 0;
+		struct pci_dev *child;
+
+		list_for_each_entry(child, &bus->devices, bus_list) {
+			struct resource *cr;
+			int j;
+
+			pci_dev_for_each_resource(child, cr, j) {
+				resource_size_t child_align, child_size;
+
+				if (!pci_resource_is_bridge_win(j))
+					continue;
+				if (!(cr->flags & IORESOURCE_PREFETCH))
+					continue;
+				if (cr->flags & IORESOURCE_DISABLED)
+					continue;
+				child_align = pci_resource_alignment(child, cr);
+				child_size = resource_size(cr);
+				if (realloc_head)
+					child_size += get_res_add_size(realloc_head, cr);
+				pref_floor = ALIGN(pref_floor, child_align) +
+					     child_size;
+			}
+		}
+
+		if (pref_floor > 0) {
+			if (size0 < pref_floor)
+				size0 = pref_floor;
+			if (size1 < pref_floor)
+				size1 = pref_floor;
+			/* Update base size so size1 recalculation stays consistent */
+			if (size < pref_floor)
+				size = pref_floor;
+			add_align = max(add_align, min_align);
+			pci_info(bus->self,
+				 "pref window floor %llu MiB; sized %llu/%llu MiB\n",
+				 (unsigned long long)(pref_floor >> 20),
+				 (unsigned long long)(size0 >> 20),
+				 (unsigned long long)(size1 >> 20));
+		}
+	}
+
 	if (size0) {
 		resource_set_range(b_res, min_align, size0);
 		b_res->flags &= ~IORESOURCE_DISABLED;
