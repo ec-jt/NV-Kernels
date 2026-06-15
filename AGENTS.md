@@ -322,12 +322,21 @@ nvidia-smi --query-gpu=name --format=csv,noheader | wc -l  # == GPU count
 
 | GPU | PCI ID | Status |
 |-----|--------|--------|
+| RTX A5000 (GA102) | `2231` | ✅ added |
+| RTX A6000 (GA102) | `2230` | ✅ added |
 | RTX 4090 (AD102) | `2684` | ✅ |
+| RTX 6000 Ada (AD102) | `26b1` | ✅ added |
 | RTX 5090 (GB202) | `2b85` | ✅ |
-| GB203 variant | `2b87` | ✅ |
+| RTX 5080 (GB203) | `2b87` | ✅ |
+| RTX 5070 Ti (GB205) | `2b89` | ✅ added |
+| RTX 5070 (GB205) | `2b8b` | ✅ added |
 | GB20x variant | `2b8f` | ✅ |
-| RTX 6000 Ada | `26b1` | not added |
-| RTX PRO 6000 Blackwell | `2bb1` | not added |
+| RTX PRO 5000 Blackwell | `2bb3` | ✅ added |
+| RTX PRO 6000 Blackwell | `2bb1` | ✅ added |
+
+> ⚠️ Verify `2b89`, `2b8b`, `2bb3` with `lspci -nn` when the cards arrive.
+> The quirk is safe: it only acts on function 0 with ReBAR capability,
+> so wrong IDs are harmless no-ops.
 
 Add `DECLARE_PCI_FIXUP_EARLY` + `DECLARE_PCI_FIXUP_RESUME_EARLY` pairs for any
 additional GPU IDs as needed.

@@ -5808,8 +5808,27 @@ DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2684, quirk_presize_rebar_nvidia
 DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2684, quirk_presize_rebar_nvidia_gb202);
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2b87, quirk_presize_rebar_nvidia_gb202);
 DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2b87, quirk_presize_rebar_nvidia_gb202);
+/* GB205 (RTX 5070 / 5070 Ti) */
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2b89, quirk_presize_rebar_nvidia_gb202);
+DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2b89, quirk_presize_rebar_nvidia_gb202);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2b8b, quirk_presize_rebar_nvidia_gb202);
+DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2b8b, quirk_presize_rebar_nvidia_gb202);
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2b8f, quirk_presize_rebar_nvidia_gb202);
 DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2b8f, quirk_presize_rebar_nvidia_gb202);
+/* RTX A5000 (GA102) / RTX A6000 (GA102) */
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2231, quirk_presize_rebar_nvidia_gb202);
+DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2231, quirk_presize_rebar_nvidia_gb202);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2230, quirk_presize_rebar_nvidia_gb202);
+DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2230, quirk_presize_rebar_nvidia_gb202);
+/* RTX 6000 Ada (AD102) */
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x26b1, quirk_presize_rebar_nvidia_gb202);
+DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, 0x26b1, quirk_presize_rebar_nvidia_gb202);
+/* RTX PRO 6000 Blackwell (GB202) */
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2bb1, quirk_presize_rebar_nvidia_gb202);
+DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2bb1, quirk_presize_rebar_nvidia_gb202);
+/* RTX PRO 5000 Blackwell (GB202/GB203) */
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2bb3, quirk_presize_rebar_nvidia_gb202);
+DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2bb3, quirk_presize_rebar_nvidia_gb202);
 
 /*
  * LAB: free 32-bit NP budget ASAP (EARLY + HEADER)
