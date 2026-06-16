@@ -1401,7 +1401,7 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 	 * size bridge windows from scratch to fit GPU BARs.
 	 */
 	if (bus->self &&
-	    lab_np_floor_target(bus->self) &&
+	    bus->self->vendor == PCI_VENDOR_ID_MICROSEMI &&
 	    bus_has_np_device(bus->self) &&
 	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW] &&
 	    resource_assigned(b_res)) {
