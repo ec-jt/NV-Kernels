@@ -1407,8 +1407,9 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 	    resource_assigned(b_res)) {
 	 old_np_sz = resource_size(b_res);
 	 pci_info(bus->self,
-	 	 "releasing firmware-assigned NP MEM window %pR to re-size\n",
-	 	 b_res);
+	 	 "LAB NP: releasing firmware window %pR (size %llu MiB) to re-size\n",
+	 	 b_res,
+	 	 (unsigned long long)(old_np_sz >> 20));
 	 release_child_resources(b_res);
 	 if (!release_resource(b_res))
 	 	pci_dbg(bus->self, "released existing window\n");
@@ -1512,6 +1513,11 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW]) {
 		resource_size_t np_child_floor = 0;
 		struct pci_dev *child;
+
+		pci_info(bus->self,
+			 "LAB NP child-align: walking %u children on bus %02x\n",
+			 (unsigned int)(bus->devices.next != &bus->devices),
+			 bus->number);
 
 		list_for_each_entry(child, &bus->devices, bus_list) {
 			struct resource *cr;
