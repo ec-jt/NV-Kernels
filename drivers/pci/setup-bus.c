@@ -1487,6 +1487,8 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 
 			pci_dev_for_each_resource(child, cr, j) {
 				resource_size_t child_align, child_size;
+				struct pci_dev *grandchild;
+				bool has_np = false;
 
 				if (!pci_resource_is_bridge_win(j))
 					continue;
@@ -1496,6 +1498,39 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 					continue;
 				if (cr->flags & IORESOURCE_DISABLED)
 					continue;
+
+				/*
+				 * Only count child bridges that have devices
+				 * with actual NP BAR needs below them.
+				 * Empty DSP ports (no GPU) should not inflate
+				 * the floor on tight-MMIO platforms.
+				 */
+				if (child->subordinate) {
+					list_for_each_entry(grandchild,
+						&child->subordinate->devices,
+						bus_list) {
+						struct resource *gr;
+						int k;
+						pci_dev_for_each_resource(
+							grandchild, gr, k) {
+							if ((gr->flags &
+							     (IORESOURCE_MEM)) &&
+							    !(gr->flags &
+							      IORESOURCE_PREFETCH)) {
+								has_np = true;
+								break;
+							}
+						}
+						if (has_np) break;
+					}
+				}
+				if (!has_np) {
+					pci_dbg(child,
+						"NP child-align: skipping bridge win %pR (no NP device below)\n",
+						cr);
+					continue;
+				}
+
 				child_align = pci_resource_alignment(child, cr);
 				child_size = resource_size(cr);
 				if (realloc_head)
