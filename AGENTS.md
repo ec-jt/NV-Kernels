@@ -280,11 +280,11 @@ following `/etc/default/grub` settings are recommended:
 
 ```bash
 # Lab 8-GPU / GPU passthrough cmdline
-GRUB_CMDLINE_LINUX="pcie_aspm=off iommu=pt iommu.strict=0 loglevel=7"
+GRUB_CMDLINE_LINUX="pcie_aspm=off iommu=pt iommu.strict=0 vfio-pci.ids=10de:2b85,10de:22e8"
 
-# For host GPU passthrough (Cloud Hypervisor / VFIO):
-# Add vfio-pci.ids=10de:2b85,10de:22e8 (adjust for your GPU IDs)
-# Then run: sudo update-grub
+# After changing, always:
+sudo update-grub
+# Then reboot (cold power-cycle preferred for GPU PERST reset)
 ```
 
 ### Key parameters
@@ -294,18 +294,28 @@ GRUB_CMDLINE_LINUX="pcie_aspm=off iommu=pt iommu.strict=0 loglevel=7"
 | `pcie_aspm=off` | Disable ASPM — prevents GPU link power-state hangs |
 | `iommu=pt` | AMD IOMMU passthrough mode — best perf for GPU DMA |
 | `iommu.strict=0` | Lazy IOMMU invalidation — reduces GPU DMA overhead |
-| `loglevel=7` | Full PCI allocator output in dmesg for debugging |
+| `vfio-pci.ids=...` | Bind GPU + audio function to vfio-pci at boot (adjust for your GPU IDs) |
 
-### Adding VFIO binding at boot (optional)
+> ⚠️ The `vfio-pci.ids` must match YOUR GPU PCI IDs.  Common NVIDIA GPU + audio pairs:
+>
+> | GPU | GPU ID | Audio ID |
+> |-----|--------|----------|
+> | RTX 5090 | `10de:2b85` | `10de:22e8` |
+> | RTX 5080 | `10de:2b87` | `10de:22e8` |
+> | RTX 5070 Ti | `10de:2b89` | `10de:22e8` |
+> | RTX 5070 | `10de:2b8b` | `10de:22e8` |
+> | RTX A5000 | `10de:2231` | TBD |
+> | RTX A6000 | `10de:2230` | TBD |
+>
+> Verify with `lspci -nn \| grep NVIDIA`.  Remove this parameter if the host
+> needs nvidia.ko to drive GPUs (e.g. for `nvidia-smi` / MIG config).  For
+> CH passthrough, vfio-pci MUST own the GPU.
 
-```bash
-# Bind RTX 5090 + audio function to vfio-pci at boot:
-GRUB_CMDLINE_LINUX="... vfio-pci.ids=10de:2b85,10de:22e8"
-```
+### VFIO verification after reboot
 
-Then `sudo update-grub` and reboot.  Verify with:
 ```bash
 ls /sys/bus/pci/drivers/vfio-pci/ | wc -l   # must match GPU count × 2
+sudo dmesg | grep -i 'iommu.*domain\|AMD-Vi\|vfio-pci.*bound'
 ```
 
 ---
