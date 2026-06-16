@@ -272,6 +272,42 @@ dmesg | grep 'LAB: matched NP target'               # which devices got freed
 nvidia-smi --query-gpu=name --format=csv,noheader | wc -l  # == GPU count
 ```
 
+## 5.1 — Recommended GRUB Cmdline
+
+This kernel has `CONFIG_PCI_REALLOC_ENABLE_AUTO=y` so `pci=realloc` is
+automatic.  For GPU passthrough (VFIO) or 8-GPU lab operation, the
+following `/etc/default/grub` settings are recommended:
+
+```bash
+# Lab 8-GPU / GPU passthrough cmdline
+GRUB_CMDLINE_LINUX="pcie_aspm=off iommu=pt iommu.strict=0 loglevel=7"
+
+# For host GPU passthrough (Cloud Hypervisor / VFIO):
+# Add vfio-pci.ids=10de:2b85,10de:22e8 (adjust for your GPU IDs)
+# Then run: sudo update-grub
+```
+
+### Key parameters
+
+| Parameter | Purpose |
+|-----------|---------|
+| `pcie_aspm=off` | Disable ASPM — prevents GPU link power-state hangs |
+| `iommu=pt` | AMD IOMMU passthrough mode — best perf for GPU DMA |
+| `iommu.strict=0` | Lazy IOMMU invalidation — reduces GPU DMA overhead |
+| `loglevel=7` | Full PCI allocator output in dmesg for debugging |
+
+### Adding VFIO binding at boot (optional)
+
+```bash
+# Bind RTX 5090 + audio function to vfio-pci at boot:
+GRUB_CMDLINE_LINUX="... vfio-pci.ids=10de:2b85,10de:22e8"
+```
+
+Then `sudo update-grub` and reboot.  Verify with:
+```bash
+ls /sys/bus/pci/drivers/vfio-pci/ | wc -l   # must match GPU count × 2
+```
+
 ---
 
 ## 6. lab_match_tbl Reference (current state)
