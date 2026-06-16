@@ -94,6 +94,32 @@ static inline bool lab_bridge_target(struct pci_dev *dev)
 	* the standard size += max(r_size, align) accumulation underestimates
 	* bus NP window size because it ignores inter-child alignment gaps.
 	*/
+/* Check if a bridge has any NP device below it */
+static bool bus_has_np_device(struct pci_dev *bridge)
+{
+	struct pci_dev *d;
+	int i;
+	struct resource *r;
+
+	if (!bridge || !bridge->subordinate)
+		return false;
+	list_for_each_entry(d, &bridge->subordinate->devices, bus_list) {
+		if (d->class >> 8 == PCI_CLASS_BRIDGE_PCI) {
+			if (d->subordinate &&
+			    bus_has_np_device(d))
+				return true;
+			continue;
+		}
+		pci_dev_for_each_resource(d, r, i) {
+			if ((r->flags & IORESOURCE_MEM) &&
+			    !(r->flags & IORESOURCE_PREFETCH) &&
+			    resource_size(r) > 0)
+				return true;
+		}
+	}
+	return false;
+}
+
 static bool lab_np_floor_target(struct pci_dev *dev)
 {
 	/* AMD GPP RPs that front a Switchtec subtree */
@@ -1376,6 +1402,7 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 	 */
 	if (bus->self &&
 	    lab_np_floor_target(bus->self) &&
+	    bus_has_np_device(bus->self) &&
 	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW] &&
 	    resource_assigned(b_res)) {
 	 old_np_sz = resource_size(b_res);
@@ -1448,10 +1475,12 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 				  0, win_align);
 
 	/*
-	 * Lab override: enforce 96 MiB NP floor on lab bridges.
+	 * Lab override: enforce 96 MiB NP floor when NP devices
+	 * actually exist below this bridge.
 	 */
 	if (bus->self &&
 	    lab_np_floor_target(bus->self) &&
+	    bus_has_np_device(bus->self) &&
 	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW]) {
 		resource_size_t floor_np = max(old_np_sz, 96ULL << 20);
 
@@ -1479,6 +1508,7 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 	 */
 	if (bus->self &&
 	    lab_np_floor_target(bus->self) &&
+	    bus_has_np_device(bus->self) &&
 	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW]) {
 		resource_size_t np_child_floor = 0;
 		struct pci_dev *child;
