@@ -1367,17 +1367,22 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 	 * get released here because a parent lab bridge may have
 	 * already released them via release_child_resources, and we
 	 * need to propagate the re-sizing.
+	 *
+	 * Always release firmware-assigned NP MEM windows on our
+	 * lab targets so we can re-size them.  These servers lack
+	 * >4G decode / ReBAR options in BIOS — the kernel must
+	 * size bridge windows from scratch to fit GPU BARs.
 	 */
 	if (bus->self &&
 	    lab_np_floor_target(bus->self) &&
 	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW] &&
 	    resource_assigned(b_res)) {
-		pci_info(bus->self,
-			 "releasing firmware-assigned NP MEM window %pR to re-size\n",
-			 b_res);
-		release_child_resources(b_res);
-		if (!release_resource(b_res))
-			pci_dbg(bus->self, "released existing window\n");
+	 pci_info(bus->self,
+	 	 "releasing firmware-assigned NP MEM window %pR to re-size\n",
+	 	 b_res);
+	 release_child_resources(b_res);
+	 if (!release_resource(b_res))
+	 	pci_dbg(bus->self, "released existing window\n");
 	}
 
 	/* If resource is already assigned, nothing more to do */
