@@ -1356,6 +1356,7 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 	int order, max_order;
 	resource_size_t children_add_size = 0;
 	resource_size_t add_align = 0;
+	resource_size_t old_np_sz = 0;  /* firmware NP size before release */
 
 	if (!b_res)
 		return;
@@ -1377,6 +1378,7 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 	    lab_np_floor_target(bus->self) &&
 	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW] &&
 	    resource_assigned(b_res)) {
+	 old_np_sz = resource_size(b_res);
 	 pci_info(bus->self,
 	 	 "releasing firmware-assigned NP MEM window %pR to re-size\n",
 	 	 b_res);
@@ -1451,7 +1453,7 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 	if (bus->self &&
 	    lab_np_floor_target(bus->self) &&
 	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW]) {
-		resource_size_t floor_np = 96ULL << 20;
+		resource_size_t floor_np = max(old_np_sz, 96ULL << 20);
 
 		if (size0 < floor_np)
 			size0 = floor_np;
