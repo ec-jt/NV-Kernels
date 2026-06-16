@@ -318,6 +318,17 @@ ls /sys/bus/pci/drivers/vfio-pci/ | wc -l   # must match GPU count × 2
 sudo dmesg | grep -i 'iommu.*domain\|AMD-Vi\|vfio-pci.*bound'
 ```
 
+### DKMS workaround for `install-rebar-kernel.sh`
+
+DKMS modules with kernel version allowlists (Mellanox OFED, kernel-mft, knem,
+xpmem) will fail to build for this custom kernel name.  The in-tree `mlx5_core`,
+`mlx5_ib`, and `ib_core` modules are sufficient for RDMA passthrough.  Add
+`|| true` to the `dpkg -i` line in your install script:
+
+```bash
+dpkg -i linux-headers-*.deb linux-image-*.deb linux-libc-dev-*.deb || true
+```
+
 ---
 
 ## 6. lab_match_tbl Reference (current state)
