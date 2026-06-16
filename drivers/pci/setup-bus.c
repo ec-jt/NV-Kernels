@@ -94,32 +94,6 @@ static inline bool lab_bridge_target(struct pci_dev *dev)
 	* the standard size += max(r_size, align) accumulation underestimates
 	* bus NP window size because it ignores inter-child alignment gaps.
 	*/
-/* Check if a bridge has any NP device below it */
-static bool bus_has_np_device(struct pci_dev *bridge)
-{
-	struct pci_dev *d;
-	int i;
-	struct resource *r;
-
-	if (!bridge || !bridge->subordinate)
-		return false;
-	list_for_each_entry(d, &bridge->subordinate->devices, bus_list) {
-		if (d->class >> 8 == PCI_CLASS_BRIDGE_PCI) {
-			if (d->subordinate &&
-			    bus_has_np_device(d))
-				return true;
-			continue;
-		}
-		pci_dev_for_each_resource(d, r, i) {
-			if ((r->flags & IORESOURCE_MEM) &&
-			    !(r->flags & IORESOURCE_PREFETCH) &&
-			    resource_size(r) > 0)
-				return true;
-		}
-	}
-	return false;
-}
-
 static bool lab_np_floor_target(struct pci_dev *dev)
 {
 	/* AMD GPP RPs that front a Switchtec subtree */
@@ -1382,10 +1356,15 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 	int order, max_order;
 	resource_size_t children_add_size = 0;
 	resource_size_t add_align = 0;
-	resource_size_t old_np_sz = 0;  /* firmware NP size before release */
 
 	if (!b_res)
 		return;
+
+	if (bus->self && lab_np_floor_target(bus->self) &&
+	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW])
+		pci_info(bus->self, "LAB|NP-ENTER: sizing NP window for %04x:%02x:%02x.%d\n",
+			 pci_domain_nr(bus), bus->number,
+			 PCI_SLOT(bus->self->devfn), PCI_FUNC(bus->self->devfn));
 
 	/*
 	 * Lab override: release firmware-assigned NP MEM window on
@@ -1394,32 +1373,26 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 	 * get released here because a parent lab bridge may have
 	 * already released them via release_child_resources, and we
 	 * need to propagate the re-sizing.
-	 *
-	 * Always release firmware-assigned NP MEM windows on our
-	 * lab targets so we can re-size them.  These servers lack
-	 * >4G decode / ReBAR options in BIOS — the kernel must
-	 * size bridge windows from scratch to fit GPU BARs.
 	 */
 	if (bus->self &&
-	    bus->self->vendor == PCI_VENDOR_ID_MICROSEMI &&
-	    bus_has_np_device(bus->self) &&
+	    lab_np_floor_target(bus->self) &&
 	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW] &&
 	    resource_assigned(b_res)) {
-	 old_np_sz = resource_size(b_res);
-	 pci_info(bus->self,
-	 	 "LAB NP: releasing firmware window %pR (size %llu MiB) to re-size\n",
-	 	 b_res,
-	 	 (unsigned long long)(old_np_sz >> 20));
-	 release_child_resources(b_res);
-	 if (!release_resource(b_res))
-	 	pci_dbg(bus->self, "released existing window\n");
+		pci_info(bus->self,
+			 "LAB|NP-REL: releasing firmware NP %pR size=%lluMiB\n",
+			 b_res,
+			 (unsigned long long)(resource_size(b_res) >> 20));
+		release_child_resources(b_res);
+		if (!release_resource(b_res))
+			pci_dbg(bus->self, "released existing window\n");
 	}
 
 	/* If resource is already assigned, nothing more to do */
 	if (resource_assigned(b_res)) {
 		if (bus->self)
-			pci_dbg(bus->self, "NP MEM %pR already assigned, skipping size\n",
-				b_res);
+			pci_info(bus->self,
+				 "LAB|NP-SKIP: %pR already assigned, skipping\n",
+				 b_res);
 		return;
 	}
 
@@ -1476,14 +1449,12 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 				  0, win_align);
 
 	/*
-	 * Lab override: enforce 96 MiB NP floor when NP devices
-	 * actually exist below this bridge.
+	 * Lab override: enforce 96 MiB NP floor on lab bridges.
 	 */
 	if (bus->self &&
 	    lab_np_floor_target(bus->self) &&
-	    bus_has_np_device(bus->self) &&
 	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW]) {
-		resource_size_t floor_np = max(old_np_sz, 96ULL << 20);
+		resource_size_t floor_np = 96ULL << 20;
 
 		if (size0 < floor_np)
 			size0 = floor_np;
@@ -1491,10 +1462,11 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 			size1 = floor_np;
 		add_align = max(add_align, min_align);
 		pci_info(bus->self,
-			 "NP window floor %llu MiB; sized %llu/%llu MiB\n",
+			 "LAB|NP-FLOOR: %lluMiB min, sized %llu/%lluMiB (raw=%lluMiB)\n",
 			 (unsigned long long)(floor_np >> 20),
 			 (unsigned long long)(size0 >> 20),
-			 (unsigned long long)(size1 >> 20));
+			 (unsigned long long)(size1 >> 20),
+			 (unsigned long long)(size >> 20));
 	}
 
 	/*
@@ -1509,15 +1481,9 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 	 */
 	if (bus->self &&
 	    lab_np_floor_target(bus->self) &&
-	    bus_has_np_device(bus->self) &&
 	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW]) {
 		resource_size_t np_child_floor = 0;
 		struct pci_dev *child;
-
-		pci_info(bus->self,
-			 "LAB NP child-align: walking %u children on bus %02x\n",
-			 (unsigned int)(bus->devices.next != &bus->devices),
-			 bus->number);
 
 		list_for_each_entry(child, &bus->devices, bus_list) {
 			struct resource *cr;
@@ -1525,8 +1491,6 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 
 			pci_dev_for_each_resource(child, cr, j) {
 				resource_size_t child_align, child_size;
-				struct pci_dev *grandchild;
-				bool has_np = false;
 
 				if (!pci_resource_is_bridge_win(j))
 					continue;
@@ -1536,39 +1500,6 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 					continue;
 				if (cr->flags & IORESOURCE_DISABLED)
 					continue;
-
-				/*
-				 * Only count child bridges that have devices
-				 * with actual NP BAR needs below them.
-				 * Empty DSP ports (no GPU) should not inflate
-				 * the floor on tight-MMIO platforms.
-				 */
-				if (child->subordinate) {
-					list_for_each_entry(grandchild,
-						&child->subordinate->devices,
-						bus_list) {
-						struct resource *gr;
-						int k;
-						pci_dev_for_each_resource(
-							grandchild, gr, k) {
-							if ((gr->flags &
-							     (IORESOURCE_MEM)) &&
-							    !(gr->flags &
-							      IORESOURCE_PREFETCH)) {
-								has_np = true;
-								break;
-							}
-						}
-						if (has_np) break;
-					}
-				}
-				if (!has_np) {
-					pci_dbg(child,
-						"NP child-align: skipping bridge win %pR (no NP device below)\n",
-						cr);
-					continue;
-				}
-
 				child_align = pci_resource_alignment(child, cr);
 				child_size = resource_size(cr);
 				if (realloc_head)
