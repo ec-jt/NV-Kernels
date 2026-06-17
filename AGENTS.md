@@ -32,32 +32,33 @@ PCIe fabric. There are two cooperating pieces:
      the entire Switchtec subtree, not just the AMD GPP root port.
    - In `pbus_size_mem()`: releases the firmware-assigned NP window on ALL
      `lab_np_floor_target()` bridges so they can be re-sized; enforces a
-     **96 MiB NP floor** per DSP; computes an **alignment-aware NP child bridge
+     **24 MiB NP floor** per DSP; computes an **alignment-aware NP child bridge
      floor** (`ALIGN(floor, child_align) + child_size`) to account for
      inter-child alignment gaps that the standard accumulation misses.
    - In `pci_bus_distribute_available_resources()`: "grow but never shrink" the
      NP MEM window on lab bridges.
 
-3. **NP Alignment Gap Fix** (added 2025-06-15)
+3. **NP Alignment Gap + Per-DSP Floor Fix** (2025-06-15, updated 2025-06-17)
    - The 6.9 kernel relied on `calculate_memsize(old_size)` to preserve
      firmware-assigned window sizes (192 MiB).  The 7.0 port lost this
      parameter, so after `release_child_resources()` wiped the hierarchy the
-     standard `size += max(r_size, align)` loop underestimated NP windows:
-     two 65 MiB children with 64 MiB alignment computed 130 MiB, but the
-     alignment gap between them required ~193 MiB.
+     standard `size += max(r_size, align)` loop underestimated NP windows.
    - **Fix**: post-accumulation NP child bridge floor that walks child bridge
-     windows with sequential packing (`ALIGN(floor, al...ign) + size`) as a
-     clamp, not in the primary accumulation loop.  This is safe — the same
-     pattern is already used for the prefetchable floor.
-   - **Result**: AMD GPP RPs get 224 MiB NP (matching 6.9), Switchtec USPs get
-     192 MiB, and all DSPs get 96 MiB — enough for 2 GPUs per switch.
-   - **Scalability**: this approach scales automatically — add more GPUs per
-     Switchtec switch and the child-align floor grows accordingly.  The
-     practical limit is the AMD host bridge NP MMIO aperture, not the kernel
-     sizing logic.  To add more GPUs, add more Switchtec switches behind
-     unused AMD GPP root ports and set `CONFIG_PCI_REALLOC_ENABLE_AUTO=y`
-     (or boot with `pci=realloc`).  The existing 8-GPU config leaves ~512 MiB
-     NP headroom per root complex; more GPUs would need more root ports.
+     windows with sequential packing (`ALIGN(floor, align) + size`) as a
+     clamp, NOT in the primary accumulation loop (see §2).
+   - **Per-DSP floor**: 24 MiB static minimum.  Why 24 MiB?
+     * RTX 5090 BAR0 = 64 MiB with 64 MiB alignment → DSP needs ~64 MiB
+     * RTX 4090 BAR0 = 16 MiB with 16 MiB alignment → DSP needs ~16 MiB
+     * 24 MiB covers both: 4090 gets 24 MiB/DSP, 5090 gets 64 MiB/DSP (raw > floor)
+     * With 24 MiB floor, 4090 USP child-align = ALIGN(0,16)+24 + ALIGN(24+16,16)+24
+       = 32 + 24 = **56 MiB** → fits in 56 MiB firmware GPP ✅
+     * With 24 MiB floor, 5090 USP child-align = ALIGN(0,64)+64 + ALIGN(128,64)+64
+       = **192 MiB** → fits in 200+ MiB firmware GPP ✅
+   - **PREVIOUS 96 MiB floor was too large**: it inflated 4090 DSPs to 96 MiB,
+     pushing the USP child-align to 192 MiB — the root bus couldn't fit it.
+   - **Result**: 5090 WS: 8 GPUs (224 MiB GPP).  4090 node: 4 GPUs (56 MiB GPP).
+   - **Tracing**: LAB|NP-* prefix traces at key sizing points — grep `LAB|NP` in
+     dmesg for live diagnostics.
 
 ---
 
@@ -280,7 +281,12 @@ following `/etc/default/grub` settings are recommended:
 
 ```bash
 # Lab 8-GPU / GPU passthrough cmdline
-GRUB_CMDLINE_LINUX="pcie_aspm=off iommu=pt iommu.strict=0 vfio-pci.ids=10de:2b85,10de:22e8"
+GRUB_CMDLINE_LINUX="pcie_aspm=off iommu=pt iommu.strict=0 pci=noaer,realloc log_buf_len=64M loglevel=7 pcie_port_pm=off nvme_core.default_ps_max_latency_us=0 printk.devkmsg=on video=efifb:off"
+
+# For nodes where the BIOS assigns tight NP MMIO windows (e.g., 4 MiB per GPP),
+# pci=realloc is CRITICAL — the kernel needs to do a full reallocation to find
+# space for the re-sized 192-224 MiB GPP NP windows.  Without it, the kernel
+# correctly sizes the windows but fails at assignment: "can't assign; no space".
 
 # After changing, always:
 sudo update-grub
