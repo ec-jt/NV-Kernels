@@ -136,9 +136,56 @@ scripts/config --disable DEBUG_INFO_BTF
 scripts/config --disable DEBUG_INFO_BTF_MODULES
 scripts/config --enable  PCI_QUIRKS
 scripts/config --enable  PCI_RESIZABLE_BAR
-scripts/config --enable  NVME_CORE
-scripts/config --enable  BLK_DEV_NVME
+scripts/config --enable  PCI
+scripts/config --enable  PCI_MSI
+scripts/config --enable  HOTPLUG_PCI
+scripts/config --enable  PCIEPORTBUS
+scripts/config --enable  ACPI
+scripts/config --enable  ACPI_PCI_SLOT
+scripts/config --enable  PCI_P2PDMA
+scripts/config --enable  VIRTIO
+scripts/config --enable  VIRTIO_PCI
+scripts/config --enable  VIRTIO_BLK
+scripts/config --enable  VIRTIO_NET
+scripts/config --enable  VIRTIO_CONSOLE
+scripts/config --enable  VIRTIO_VSOCKETS
+scripts/config --enable  DMA_SHARED_BUFFER
+scripts/config --enable  DMABUF_MOVE_NOTIFY
+scripts/config --enable  ZONE_DEVICE
+scripts/config --enable  HMM_MIRROR
+scripts/config --enable  DEV_PAGEMAP_OPS
+scripts/config --enable  MEMORY_HOTPLUG
+scripts/config --enable  MEMORY_HOTREMOVE
+scripts/config --enable  NUMA
+scripts/config --enable  ACPI_NUMA
+scripts/config --module  NVME_CORE
+scripts/config --module  BLK_DEV_NVME
 scripts/config --enable  NVME_PCI
+scripts/config --enable  INFINIBAND
+scripts/config --module  INFINIBAND_USER_ACCESS
+scripts/config --module  RDMA_CM
+scripts/config --module  IB_UVERBS
+scripts/config --module  MLX5_CORE
+scripts/config --module  MLX5_INFINIBAND
+scripts/config --enable  HUGETLBFS
+scripts/config --enable  TRANSPARENT_HUGEPAGE
+
+# GPU passthrough / CH IOMMUFD path
+scripts/config --enable  COMPILE_TEST        # required on x86 for NVGRACE_* modules
+scripts/config --enable  IOMMU_SUPPORT
+scripts/config --enable  IOMMUFD
+scripts/config --enable  VFIO
+scripts/config --enable  VFIO_GROUP
+scripts/config --enable  VFIO_CONTAINER      # keep legacy Type1 VFIO container path
+scripts/config --enable  VFIO_DEVICE_CDEV
+scripts/config --enable  VFIO_NOIOMMU
+scripts/config --enable  VFIO_PCI
+scripts/config --enable  VFIO_PCI_VGA
+scripts/config --enable  VFIO_PCI_IGD
+scripts/config --module  VFIO_MDEV
+scripts/config --module  NVGRACE_EGM
+scripts/config --module  NVGRACE_GPU_VFIO_PCI
+scripts/config --disable IOMMUFD_VFIO_CONTAINER  # keep native VFIO Type1 container
 
 # Debug visibility: AST built-in (not a module)
 scripts/config --enable  DRM
@@ -366,6 +413,10 @@ sudo reboot
 ```bash
 ls /sys/bus/pci/drivers/vfio-pci/ | wc -l   # must match GPU count × 2
 sudo dmesg | grep -i 'iommu.*domain\|AMD-Vi\|vfio-pci.*bound'
+
+# IOMMUFD / VFIO cdev / PCI P2PDMA config validation
+test -e /dev/iommu && echo /dev/iommu OK
+grep -E 'CONFIG_(IOMMUFD|VFIO_CONTAINER|VFIO_DEVICE_CDEV|VFIO_PCI|PCI_P2PDMA|DMA_SHARED_BUFFER|DMABUF_MOVE_NOTIFY|ZONE_DEVICE|MEMORY_HOTPLUG|MEMORY_HOTREMOVE|NUMA|ACPI_NUMA|INFINIBAND|HUGETLBFS|TRANSPARENT_HUGEPAGE)=y|CONFIG_(VFIO_MDEV|NVGRACE_EGM|NVGRACE_GPU_VFIO_PCI|INFINIBAND_USER_ACCESS|MLX5_CORE|MLX5_INFINIBAND|NVME_CORE|BLK_DEV_NVME)=m' /boot/config-$(uname -r)
 ```
 
 ### DKMS workaround for `install-rebar-kernel.sh`

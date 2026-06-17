@@ -4,6 +4,7 @@
  */
 
 #include <linux/sizes.h>
+#include <linux/bitfield.h>
 #include <linux/vfio_pci_core.h>
 #include <linux/delay.h>
 #include <linux/jiffies.h>
