@@ -1435,6 +1435,8 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 
 			r_size = resource_size(r);
 			size += max(r_size, align);
+				if (bus->self && lab_np_floor_target(bus->self) && b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW])
+					pci_info(bus->self, "LAB|NP-RES: %s %pR size=%lluMiB align=%lluMiB\n", r_name, r, (unsigned long long)(r_size >> 20), (unsigned long long)(align >> 20));
 
 			aligns[order] += align;
 			if (order > max_order)
