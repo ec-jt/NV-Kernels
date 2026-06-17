@@ -1456,7 +1456,7 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 	if (bus->self &&
 	    lab_np_floor_target(bus->self) &&
 	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW]) {
-		resource_size_t floor_np = 32ULL << 20;
+		resource_size_t floor_np = 24ULL << 20;
 
 		if (size0 < floor_np)
 			size0 = floor_np;
