@@ -268,6 +268,34 @@ This generates a NEW menu entry for `vmlinuz-7.0.0-rebar-debug+` while leaving
 the existing `-p2p` / `-rebar` / `-nv` entries intact as fallbacks. Verify the
 new entry and initrd were found in the `update-grub` output before rebooting.
 
+### 4.6 Install from pre-built .deb packages (GitHub Release)
+
+When installing from a release (no local build needed):
+
+```bash
+# 1. Download the three .deb files from the release page
+# 2. Install them — postinst hooks run depmod + update-grub automatically
+sudo dpkg -i linux-headers-*.deb linux-image-*.deb linux-libc-dev-*.deb || true
+
+# 3. Ensure GRUB cmdline has the lab parameters (see §5.1)
+sudo vi /etc/default/grub
+sudo update-grub
+
+# 4. Reboot (cold power-cycle preferred for GPU PERST reset)
+sudo reboot
+```
+
+The `|| true` is a DKMS workaround — third-party DKMS modules (Mellanox OFED,
+kernel-mft, knem, xpmem) may fail to build for the custom kernel name, but the
+in-tree `mlx5_core` / `mlx5_ib` are sufficient for RDMA passthrough.
+
+The `dpkg -i` postinst scripts call `depmod` and `update-grub` automatically,
+so a separate `update-grub` is only needed if you changed the GRUB cmdline.
+
+> ⚠️ Set `MODULES=dep` in `/etc/initramfs-tools/initramfs.conf` **before**
+> installing the .debs if you want a smaller initramfs.  Otherwise the default
+> `MODULES=most` produces a large initrd (see §4.4).
+
 ---
 
 ## 5. Validation After Reboot
