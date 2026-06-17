@@ -170,6 +170,14 @@ make -s kernelrelease      # MUST show 7.0.0-rebar-debug (verify it is UNIQUE)
 ls /boot/vmlinuz-*         # confirm the name does NOT collide with an existing kernel
 ```
 
+> If `kernelrelease` still shows `+` despite `.scmversion`, override it:
+> ```bash
+> LOCALVERSION= make -s kernelrelease          # 7.0.0-rebar-debug (no +)
+> LOCALVERSION= make bindeb-pkg -j"$(nproc)"  # builds .deb without +
+> ```
+> The `+` comes from `scripts/setlocalversion` detecting a dirty git tree.
+> Setting `LOCALVERSION=` (empty) at make invocation forces a clean suffix.
+
 > Keep the debug build's name distinct (e.g. `-rebar-debug`) so the prior
 > `-p2p` / `-rebar` kernels survive as bootable fallbacks.
 
