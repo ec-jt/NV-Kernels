@@ -329,6 +329,14 @@ sudo update-grub
 # Then reboot (cold power-cycle preferred for GPU PERST reset)
 ```
 
+Or as a one-liner for scripts:
+
+```bash
+sudo sed -i 's/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX="pcie_aspm=off iommu=pt iommu.strict=0 pci=noaer,realloc log_buf_len=64M loglevel=7 pcie_port_pm=off nvme_core.default_ps_max_latency_us=0 printk.devkmsg=on video=efifb:off"/' /etc/default/grub
+sudo update-grub
+sudo reboot
+```
+
 ### Key parameters
 
 | Parameter | Purpose |
