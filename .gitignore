@@ -184,3 +184,11 @@ sphinx_*/
 
 # Rust analyzer configuration
 /rust-project.json
+-e 
+# Build artifacts from bindeb-pkg
+debian/arch
+debian/headers.files
+debian/image-dbg.files
+debian/image.files
+debian/libc-dev.files
+debian/rules.vars
