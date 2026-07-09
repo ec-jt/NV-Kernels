@@ -1494,7 +1494,21 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 			pci_dev_for_each_resource(child, cr, j) {
 				resource_size_t child_align, child_size;
 
-				if (!pci_resource_is_bridge_win(j))
+				/*
+				 * Pack child bridge NP windows AND endpoint
+				 * NP BARs.  The Switchtec MGMT endpoint
+				 * (11f8:4052, BAR0 4 MiB @ 4 MiB align) sits
+				 * NEXT TO the upstream port on the same bus;
+				 * packing only bridge windows starved its
+				 * BAR0 out of the parent window: 193 MiB
+				 * (64 MiB-aligned) child window + 4 MiB BAR
+				 * needs ALIGN(193M,4M)+4M = 200 MiB, not
+				 * 197 MiB ("can't assign; no space" and the
+				 * switchtec driver probe failed with -16,
+				 * killing the reboot-free GPU recovery path).
+				 */
+				if (!pci_resource_is_bridge_win(j) &&
+				    j >= PCI_STD_NUM_BARS)
 					continue;
 				if (cr->flags & IORESOURCE_PREFETCH)
 					continue;
@@ -1506,6 +1520,8 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 				child_size = resource_size(cr);
 				if (realloc_head)
 					child_size += get_res_add_size(realloc_head, cr);
+				if (!child_size || !child_align)
+					continue;
 				np_child_floor = ALIGN(np_child_floor, child_align) +
 						 child_size;
 			}
