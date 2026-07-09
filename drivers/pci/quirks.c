@@ -5856,9 +5856,19 @@ static const struct pci_device_id lab_match_tbl[] = {
 	/* { PCI_DEVICE(0x1a03,   0x2000), .driver_data = LAB_DEV_BMC_VGA_ASPEED }, */
 	{ PCI_DEVICE(PCI_VENDOR_ID_ASMEDIA,  0x1142), .driver_data = LAB_DEV_USB_ASM1042A },
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD,      0x148c), .driver_data = LAB_DEV_USB_XHCI_AMD },
-	{ PCI_DEVICE(PCI_VENDOR_ID_MICROSEMI,0x4052), .driver_data = LAB_DEV_SWITCHTEC_MGMT },
-	{ PCI_VENDOR_ID_MICROSEMI, PCI_ANY_ID, PCI_ANY_ID, PCI_ANY_ID,
-	  (PCI_CLASS_MEMORY_OTHER << 8), 0xFFFF00, .driver_data = LAB_DEV_SWITCHTEC_MGMT },
+	/*
+	 * Keep the Switchtec MGMT endpoints (11f8:4052 class 0580) ALIVE:
+	 * BAR0 is the MRPC mailbox needed by the switchtec driver +
+	 * switchtec-user CLI for per-port PERST#/hot-reset — the only
+	 * reboot-free recovery path for FSP-wedged / fell-off-the-bus
+	 * GPUs (2026-07-09 post-mortem: an FLR-killed GPU D-stated the
+	 * whole PCI subsystem; a switch-side port reset could have
+	 * recovered it).  Cost: ~4 MiB NP per switch (4 switches =
+	 * ~16 MiB) — fits the NP budget since the 24 MiB floor work.
+	 */
+	/* { PCI_DEVICE(PCI_VENDOR_ID_MICROSEMI,0x4052), .driver_data = LAB_DEV_SWITCHTEC_MGMT }, */
+	/* { PCI_VENDOR_ID_MICROSEMI, PCI_ANY_ID, PCI_ANY_ID, PCI_ANY_ID,
+	  (PCI_CLASS_MEMORY_OTHER << 8), 0xFFFF00, .driver_data = LAB_DEV_SWITCHTEC_MGMT }, */
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD,      0x7901), .driver_data = LAB_DEV_SATA_AHCI_AMD },
 	{ PCI_DEVICE_CLASS((PCI_CLASS_STORAGE_SATA_AHCI << 8), ~0),
 	  .driver_data = LAB_DEV_SATA_AHCI_AMD },
