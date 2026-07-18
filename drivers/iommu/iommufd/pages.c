@@ -876,7 +876,7 @@ static long pin_memfd_pages(struct pfn_reader_user *user, unsigned long start,
 
 static int follow_fault_pfn(struct vm_area_struct *vma, struct mm_struct *mm,
 			    unsigned long vaddr, unsigned long *pfn,
-			    bool write_fault)
+			    unsigned long *addr_mask, bool write_fault)
 {
 	struct follow_pfnmap_args args = { .vma = vma, .address = vaddr };
 	int ret;
@@ -900,10 +900,13 @@ static int follow_fault_pfn(struct vm_area_struct *vma, struct mm_struct *mm,
 			return ret;
 	}
 
-	if (write_fault && !args.writable)
+	if (write_fault && !args.writable) {
 		ret = -EFAULT;
-	else
+	} else {
 		*pfn = args.pfn;
+		if (addr_mask)
+			*addr_mask = args.addr_mask;
+	}
 
 	follow_pfnmap_end(&args);
 	return ret;
@@ -982,7 +985,7 @@ static int pfn_reader_user_pin(struct pfn_reader_user *user,
 		struct vm_area_struct *vma;
 		unsigned long vaddr;
 		unsigned long pfn;
-		int pinned = 0;
+		long pinned = 0;
 
 		/* fast path above doesn't hold the lock */
 		if (!user->locked)
@@ -992,15 +995,40 @@ retry:
 		vma = vma_lookup(pages->source_mm, vaddr);
 		if (vma && vma->vm_flags & VM_PFNMAP) {
 			do {
+				unsigned long addr_mask = PAGE_MASK;
+
 				rc = follow_fault_pfn(vma, pages->source_mm, vaddr,
-						      &pfn, pages->writable);
+						      &pfn, &addr_mask,
+						      pages->writable);
 				if (rc == -EAGAIN)
 					goto retry;
 				if (!rc) {
 					if (!pfn_valid(pfn)) {
-						user->upages[pinned] = pfn_to_page(pfn);
-						pinned += 1;
-						vaddr += PAGE_SIZE;
+						unsigned long batch, i;
+						unsigned long entry_end;
+
+						/*
+						 * A huge pfnmap entry (PMD/PUD,
+						 * e.g. a 1GB VFIO BAR insert)
+						 * covers a contiguous PFN range
+						 * around vaddr — fill every page
+						 * it covers in one walk instead
+						 * of re-walking per 4KB page.
+						 * For a 32GB GPU BAR1 this turns
+						 * 8.4M page-table walks into 32.
+						 */
+						entry_end = (vaddr & addr_mask) +
+							(~addr_mask + 1);
+						batch = min3((unsigned long)(npages - pinned),
+							     (entry_end - vaddr) >> PAGE_SHIFT,
+							     (vma->vm_end - vaddr) >> PAGE_SHIFT);
+						if (!batch)
+							batch = 1;
+						for (i = 0; i < batch; i++)
+							user->upages[pinned + i] =
+								pfn_to_page(pfn + i);
+						pinned += batch;
+						vaddr += batch << PAGE_SHIFT;
 					} else {
 						rc = -EFAULT;
 					}
