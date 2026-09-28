@@ -1,30 +1,36 @@
-# PCI BAR1 Porting Plan: Linux 6.9 → NV-Kernel 7.0 BOS
+# Historical PCI BAR1 porting plan: Linux 6.9 to NV-Kernel 7.0 BOS
+
+This document records an earlier design, including obsolete sizing rules and
+unverified device IDs. Do not apply its code snippets to the current branch.
+Use [AGENTS.md](AGENTS.md) and
+[REBAR-MIXED-TOPOLOGY.md](REBAR-MIXED-TOPOLOGY.md) for current behavior and the
+validated mixed-GPU implementation.
 
 **Target:** `/home/ubuntu/NV-Kernels` branch `24.04_linux-nvidia-bos-7.0-next-port`
 **Kernel:** 7.0.0 (`Ubuntu-nvidia-bos-7.0.0-2008.8`)
-**Source:** `/home/ubuntu/linux-6.9.0/` — actual working tree (NOT the stale README)
+**Source:** `/home/ubuntu/linux-6.9.0/` - actual working tree (NOT the stale README)
 
 ---
 
-## ⚠️ README vs Actual Code Discrepancies Found
+## README vs Actual Code Discrepancies Found
 
 | Aspect | README says | Actual 6.9 code |
 |--------|------------|-----------------|
 | LAB NP matching | Hardcoded BDFs (0x84:00.0 etc.) | **Vendor/device/class match table** via `pci_match_id()` |
-| Bridge detection | `bridge_is_c0_01_1()` — hardcoded BDFs | **`lab_bridge_target()`** — DMI Gigabyte + Switchtec subtree scan |
+| Bridge detection | `bridge_is_c0_01_1()` - hardcoded BDFs | **`lab_bridge_target()`** - DMI Gigabyte + Switchtec subtree scan |
 | NP floor | 228 MiB | **96 MiB** minimum, not 228 |
 | AMD GPP hotplug | Active (DECLARE_PCI_FIXUP_HEADER) | **Commented out** (lines 393-423) |
 | NVIDIA devices | 0x2b85 only | **0x2b85 + 0x2684** (5090 + 4090) |
 
 ---
 
-## API Changes (6.9 → 7.0)
+## API Changes (6.9 to 7.0)
 
 | API | 6.9 | 7.0 |
 |-----|-----|-----|
 | `pci_rebar_get_possible_sizes()` | `u32`, `BIT()` | **`u64`, `BIT_ULL()`** |
 | `pci_rebar_init(dev)` | Not needed | **Must call explicitly** before rebar functions |
-| `pbus_size_mem()` | `(bus, mask, type, type2, type3, min_size, add_size, realloc_head)` — finds b_res | `(bus, b_res, add_size, realloc_head)` — b_res passed in |
+| `pbus_size_mem()` | `(bus, mask, type, type2, type3, min_size, add_size, realloc_head)` - finds b_res | `(bus, b_res, add_size, realloc_head)` - b_res passed in |
 | `pci_bus_distribute_available_resources()` | `(bus, add_list, io, mmio, mmio_pref)` | `(bus, add_list, available[2])` |
 | `b_res->parent` check | `b_res->parent` | `resource_assigned(b_res)` |
 | `b_res->start/end` | Direct assignment | `resource_set_range(b_res, ...)` |
@@ -32,9 +38,9 @@
 
 ---
 
-## Phase 1 — quirks.c (compile test only)
+## Phase 1 - quirks.c (compile test only)
 
-### P1.1 — NVIDIA ReBAR Presize (devices 0x2b85 + 0x2684)
+### P1.1 - NVIDIA ReBAR Presize (devices 0x2b85 + 0x2684)
 
 Based on actual 6.9 lines 351-387. Insert anywhere in quirks.c.
 
@@ -44,7 +50,7 @@ Based on actual 6.9 lines 351-387. Insert anywhere in quirks.c.
  * so bridge sizing sees the full framebuffer aperture (BAR1).
  *
  * 7.0: pci_rebar_init() must be called explicitly before rebar functions.
- *      sizes is now u64 — use BIT_ULL().
+ *      sizes is now u64 - use BIT_ULL().
  */
 static void quirk_presize_rebar_nvidia_gb202(struct pci_dev *dev)
 {
@@ -81,18 +87,18 @@ DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2684, quirk_presize_rebar
 **NVIDIA device ID coverage:**
 | Device | PCI ID | Status |
 |--------|--------|--------|
-| RTX 4090 (AD102) | 0x2684 | ✅ in code |
-| RTX 6000 Ada | 0x26b1 | Not yet — add if needed |
-| RTX 5090 (GB202) | 0x2b85 | ✅ in code |
-| RTX PRO 6000 Blackwell | 0x2bb1 | Not yet — add if needed |
+| RTX 4090 (AD102) | 0x2684 | Present |
+| RTX 6000 Ada | 0x26b1 | Not yet - add if needed |
+| RTX 5090 (GB202) | 0x2b85 | Present |
+| RTX PRO 6000 Blackwell | 0x2bb1 | Not yet - add if needed |
 | RTX 5080 (GB203) | 0x2b87? | **Need to verify** |
 | RTX 5070 Ti (GB205) | 0x2b8x? | **Need to verify** |
 
-> ⚠️ **User action needed**: confirm PCI IDs for RTX 5080/5070 Ti and add DECLARE_PCI_FIXUP lines if needed.
+> **User action needed**: confirm PCI IDs for RTX 5080/5070 Ti and add DECLARE_PCI_FIXUP lines if needed.
 
-### P1.2 — LAB NP Budget Freer (vendor/device/class matching)
+### P1.2 - LAB NP Budget Freer (vendor/device/class matching)
 
-Based on actual 6.9 lines 241-348. Uses `pci_match_id()` table — NOT BDFs.
+Based on actual 6.9 lines 241-348. Uses `pci_match_id()` table - NOT BDFs.
 
 ```c
 /*
@@ -184,15 +190,15 @@ static void quirk_lab_free_np_header(struct pci_dev *dev)
 DECLARE_PCI_FIXUP_HEADER(PCI_ANY_ID, PCI_ANY_ID, quirk_lab_free_np_header);
 ```
 
-### P1.3 — AMD GPP Hotplug Force
+### P1.3 - AMD GPP Hotplug Force
 
 **NOTE: This quirk is COMMENTED OUT in the 6.9 working tree (lines 393-423).**
-It is included here for reference — decide whether to activate for 7.0.
+It is included here for reference - decide whether to activate for 7.0.
 
 ```c
 /*
  * Force selected AMD GPP Root Ports to be treated as hot-plug bridges.
- * COMMENTED OUT in 6.9 working tree — uncomment if needed for 7.0.
+ * COMMENTED OUT in 6.9 working tree - uncomment if needed for 7.0.
  */
 static bool quirk_match_bdf(struct pci_dev *pdev, u8 bus, u8 devfn_slot, u8 func)
 {
@@ -220,14 +226,14 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_AMD, PCI_DEVICE_ID_AMD_GPP_ROOT_PORT,
 
 ---
 
-## Phase 2 — setup-bus.c Helper Functions
+## Phase 2 - setup-bus.c Helper Functions
 
 Based on actual 6.9 lines 1009-1053.
 
-**⚠️ Requires `#include <linux/dmi.h>` at top of setup-bus.c** (not currently included).
+**Requires `#include <linux/dmi.h>` at top of setup-bus.c** (not currently included).
 
 ```c
-/* Lab: identify target bridges — DMI Gigabyte + Switchtec subtree scan */
+/* Lab: identify target bridges - DMI Gigabyte + Switchtec subtree scan */
 static bool lab_platform_ok(void)
 {
 #ifdef CONFIG_DMI
@@ -271,7 +277,7 @@ static inline bool lab_bridge_target(struct pci_dev *dev)
 
 ---
 
-## Phase 3 — setup-bus.c pbus_size_mem() Override
+## Phase 3 - setup-bus.c pbus_size_mem() Override
 
 ### 6.9 behavior (lines 1092-1193):
 1. Releases firmware-assigned NP MEM window on lab bridges
@@ -335,7 +341,7 @@ The 7.0 function already receives `b_res` as parameter. Insert after `resource_a
 
 ---
 
-## Phase 4 — setup-bus.c Distribution Guard
+## Phase 4 - setup-bus.c Distribution Guard
 
 ### 6.9 behavior (lines 1989-1997):
 Uses "grow but never shrink" for lab bridges:
@@ -378,12 +384,12 @@ With:
 
 ---
 
-## Phase 5 — Config + Boot Flags
+## Phase 5 - Config + Boot Flags
 
 ### Kernel config
 ```bash
 scripts/config --enable PCI_QUIRKS
-# PCI_RESIZABLE_BAR is unconditional in 7.0 — no config needed
+# PCI_RESIZABLE_BAR is unconditional in 7.0 - no config needed
 ```
 
 ### Boot flags (GRUB_CMDLINE_LINUX_DEFAULT)
@@ -425,5 +431,5 @@ nvidia-smi --query-gpu=name --format=csv,noheader | wc -l  # == GPU count
 ## Open Questions
 
 1. **NVIDIA device IDs**: Need to confirm 5080/5070 Ti PCI IDs and add if desired
-2. **AMD GPP hotplug**: Commented out in 6.9 — enable for 7.0?
-3. **NP floor**: 96 MiB in 6.9 — is this sufficient for your 8×5090 config or does it need to be higher?
+2. **AMD GPP hotplug**: Commented out in 6.9 - enable for 7.0?
+3. **NP floor**: 96 MiB in 6.9 - is this sufficient for your 8 x 5090 config or does it need to be higher?

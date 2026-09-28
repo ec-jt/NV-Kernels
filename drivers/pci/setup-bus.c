@@ -91,22 +91,18 @@ static inline bool lab_bridge_target(struct pci_dev *dev)
 }
 
 /*
-	* lab_np_floor_target - does this bridge need alignment-aware NP sizing?
-	*
-	* Matches AMD GPP root ports fronting Switchtec subtrees, plus all
-	* Switchtec upstream/downstream ports.  These are the bridges where
-	* the standard size += max(r_size, align) accumulation underestimates
-	* bus NP window size because it ignores inter-child alignment gaps.
-	*/
+ * Identify lab GPU branches and Switchtec ports that need NP alignment floors
+ * when their windows are unassigned. Assigned firmware windows are preserved.
+ */
 static bool lab_np_floor_target(struct pci_dev *dev)
 {
 	if (!lab_platform_ok())
 		return false;
 
-	/* AMD GPP RPs that front a Switchtec subtree */
+	/* Bridges above supported GPUs or the Switchtec fabric. */
 	if (lab_bridge_target(dev))
 		return true;
-	/* Switchtec upstream and downstream ports */
+	/* Include Switchtec ports whose downstream device is a NIC. */
 	if (dev && dev->vendor == PCI_VENDOR_ID_MICROSEMI &&
 	    dev->device == 0x4052) {
 		u8 type = pci_pcie_type(dev);

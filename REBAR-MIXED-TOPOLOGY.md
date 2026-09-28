@@ -307,3 +307,10 @@ Userspace-header installation is not required merely to boot the new kernel.
 Package installation can invoke existing DKMS hooks, so examine their results
 rather than masking failures. Never remove a bootable fallback as part of
 package installation.
+
+The resulting image, headers, userspace headers, build metadata, and checksums
+are in [the package directory](debs/rebar-mixed-5070ti-5090/README.md).
+The packaging rebuild uses the same configuration and functional source but
+is not byte-identical to the boot-tested image. The package notes record both
+image hashes and the validation boundary. The boot-tested image remains the
+installed default on the test server.

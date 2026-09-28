@@ -5775,7 +5775,7 @@ bool pci_dev_specific_ats_always_on(struct pci_dev *pdev)
  * so bridge sizing sees the full framebuffer aperture (BAR1).
  *
  * 7.0: pci_rebar_init() must be called explicitly before rebar functions.
- *      sizes is now u64 — use BIT_ULL().
+ *      sizes is now u64, so use BIT_ULL().
  */
 static void quirk_presize_rebar_nvidia_gb202(struct pci_dev *dev)
 {
@@ -5856,19 +5856,19 @@ enum lab_dev_tag {
 	LAB_DEV_USB_XHCI_ANY,
 };
 static const struct pci_device_id lab_match_tbl[] = {
-	/* Keep AST BMC VGA alive for boot debugging — do NOT free its BARs */
+	/* Preserve AST BMC VGA resources for the recovery console. */
 	/* { PCI_DEVICE(0x1a03,   0x2000), .driver_data = LAB_DEV_BMC_VGA_ASPEED }, */
 	{ PCI_DEVICE(PCI_VENDOR_ID_ASMEDIA,  0x1142), .driver_data = LAB_DEV_USB_ASM1042A },
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD,      0x148c), .driver_data = LAB_DEV_USB_XHCI_AMD },
 	/*
-	 * Keep the Switchtec MGMT endpoints (11f8:4052 class 0580) ALIVE:
+	 * Preserve the Switchtec management endpoints (11f8:4052 class 0580).
 	 * BAR0 is the MRPC mailbox needed by the switchtec driver +
-	 * switchtec-user CLI for per-port PERST#/hot-reset — the only
+	 * switchtec-user CLI for per-port PERST#/hot-reset, the only
 	 * reboot-free recovery path for FSP-wedged / fell-off-the-bus
 	 * GPUs (2026-07-09 post-mortem: an FLR-killed GPU D-stated the
 	 * whole PCI subsystem; a switch-side port reset could have
 	 * recovered it).  Cost: ~4 MiB NP per switch (4 switches =
-	 * ~16 MiB) — fits the NP budget since the 24 MiB floor work.
+	 * ~16 MiB), which must be included in the NP budget.
 	 */
 	/* { PCI_DEVICE(PCI_VENDOR_ID_MICROSEMI,0x4052), .driver_data = LAB_DEV_SWITCHTEC_MGMT }, */
 	/* { PCI_VENDOR_ID_MICROSEMI, PCI_ANY_ID, PCI_ANY_ID, PCI_ANY_ID,
