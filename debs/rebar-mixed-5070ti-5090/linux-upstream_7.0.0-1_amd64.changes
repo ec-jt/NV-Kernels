@@ -1,0 +1,34 @@
+Format: 1.8
+Date: Mon, 28 Sep 2026 21:40:56 +0000
+Source: linux-upstream
+Binary: linux-headers-7.0.0-rebar-mixed-5070ti-5090 linux-image-7.0.0-rebar-mixed-5070ti-5090 linux-libc-dev
+Built-For-Profiles: noudeb pkg.linux-upstream.nokerneldbg
+Architecture: amd64
+Version: 7.0.0-1
+Distribution: noble
+Urgency: low
+Maintainer: ubuntu <ubuntu@server1-34.bir-kh.lan.danucore.com>
+Changed-By: ubuntu <ubuntu@server1-34.bir-kh.lan.danucore.com>
+Description:
+ linux-headers-7.0.0-rebar-mixed-5070ti-5090 - Linux kernel headers for 7.0.0-rebar-mixed-5070ti-5090 on amd64
+ linux-image-7.0.0-rebar-mixed-5070ti-5090 - Linux kernel, version 7.0.0-rebar-mixed-5070ti-5090
+ linux-libc-dev - Linux support headers for userspace development
+Changes:
+ linux-upstream (7.0.0-1) noble; urgency=low
+ .
+   * Custom built Linux kernel.
+Checksums-Sha1:
+ 91200b52d5fa5964f7e862f052a6a641ca6fa87c 10502260 linux-headers-7.0.0-rebar-mixed-5070ti-5090_7.0.0-1_amd64.deb
+ 9864dd34cb9c3e87cd2e01f6950e66729f2e0ea8 103136104 linux-image-7.0.0-rebar-mixed-5070ti-5090_7.0.0-1_amd64.deb
+ f073b4adcfd910860d77e03be2f1917b9782cf8f 1492200 linux-libc-dev_7.0.0-1_amd64.deb
+ ece174f26adc6f6db1b3f95d0edc95d19eb3efda 8368 linux-upstream_7.0.0-1_amd64.buildinfo
+Checksums-Sha256:
+ 15d431c55ebaa58a5a2c78116eb7830a50bc152360e63981627fd75214519c1e 10502260 linux-headers-7.0.0-rebar-mixed-5070ti-5090_7.0.0-1_amd64.deb
+ 17b0e5c524862d235126536d99c1b3f2bbcfd0b2663f18ee4b734dd226e71fd4 103136104 linux-image-7.0.0-rebar-mixed-5070ti-5090_7.0.0-1_amd64.deb
+ de57106b7d0c22814035ed53adf8939df25282749f823123c5c5cbd531a7d7b9 1492200 linux-libc-dev_7.0.0-1_amd64.deb
+ d883e63c056ca04ba86f8f9703b9403ba531de86288aae4b6a588dbd22352f83 8368 linux-upstream_7.0.0-1_amd64.buildinfo
+Files:
+ 04a2ff5c82c7931e0154712287052f73 10502260 kernel optional linux-headers-7.0.0-rebar-mixed-5070ti-5090_7.0.0-1_amd64.deb
+ 9bd794bf0910e839ac782f7ae661756f 103136104 kernel optional linux-image-7.0.0-rebar-mixed-5070ti-5090_7.0.0-1_amd64.deb
+ dfe09dbc02e6d7f08974788ba816b580 1492200 devel optional linux-libc-dev_7.0.0-1_amd64.deb
+ 3cd8b3e8bf72382bdf37c4973978e0d3 8368 kernel optional linux-upstream_7.0.0-1_amd64.buildinfo
