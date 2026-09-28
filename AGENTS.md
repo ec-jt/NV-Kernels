@@ -8,6 +8,21 @@ This file is the working reference for AI agents (and humans) maintaining the
 local PCI ReBAR / NP-budget lab patches. Read this before touching
 `drivers/pci/quirks.c` or `drivers/pci/setup-bus.c`.
 
+## Mixed-topology update (2026-09-28)
+
+The current mixed 8 x RTX 5070 Ti / 4 x RTX 5090 changes and validation procedure
+are documented in [REBAR-MIXED-TOPOLOGY.md](REBAR-MIXED-TOPOLOGY.md). That document
+supersedes the historical unconditional NP-window release and bus-order floor
+descriptions below. Assigned firmware NP windows are now preserved; the floor
+uses descending alignment order. A boot-only PREF release prepass requires
+PCI reallocation to be enabled. Do not leave a later reallocation-disable
+option in the effective boot command line.
+
+Verified RTX 5070 Ti IDs are 10de:2c05 (GB203 graphics) and 10de:22e9 (audio).
+Its BAR1 supports 16 GiB, not the 5090's 32 GiB. The old 2b89 identification was
+an unverified guess. Switchtec management remains enabled and is not an NP-free
+target. Full kernel build and boot validation are still mandatory.
+
 ---
 
 ## 1. What These Patches Do
@@ -399,7 +414,7 @@ sudo reboot
 > |-----|--------|----------|
 > | RTX 5090 | `10de:2b85` | `10de:22e8` |
 > | RTX 5080 | `10de:2b87` | `10de:22e8` |
-> | RTX 5070 Ti | `10de:2b89` | `10de:22e8` |
+> | RTX 5070 Ti (verified GB203) | `10de:2c05` | `10de:22e9` |
 > | RTX 5070 | `10de:2b8b` | `10de:22e8` |
 > | RTX A5000 | `10de:2231` | TBD |
 > | RTX A6000 | `10de:2230` | TBD |
@@ -439,7 +454,7 @@ dpkg -i linux-headers-*.deb linux-image-*.deb linux-libc-dev-*.deb || true
 | ASPEED BMC VGA | `1a03:2000` | device | **COMMENTED OUT** (keep console alive) |
 | ASM1042A xHCI | `1b21:1142` | device | active |
 | AMD xHCI | `1022:148c` | device | active |
-| Switchtec mgmt | `11f8:4052` | device + class | active (the NP target) |
+| Switchtec mgmt | `11f8:4052` | device + class | COMMENTED OUT (keep management and reset access) |
 | AMD SATA AHCI | `1022:7901` | device | active |
 | any AHCI | class `0106` | class wildcard | active (⚠ nukes all SATA BARs) |
 | any xHCI | class `0c03` | class wildcard | active (⚠ nukes all xHCI BARs) |
@@ -486,7 +501,8 @@ dpkg -i linux-headers-*.deb linux-image-*.deb linux-libc-dev-*.deb || true
 | RTX 6000 Ada (AD102) | `26b1` | ✅ added |
 | RTX 5090 (GB202) | `2b85` | ✅ |
 | RTX 5080 (GB203) | `2b87` | ✅ |
-| RTX 5070 Ti (GB205) | `2b89` | ✅ added |
+| RTX 5070 Ti (GB203, verified) | `2c05` | added, 16 GiB BAR1 |
+| Previously guessed GB20x ID | `2b89` | existing registration retained, model unverified |
 | RTX 5070 (GB205) | `2b8b` | ✅ added |
 | GB20x variant | `2b8f` | ✅ |
 | RTX PRO 5000 Blackwell | `2bb3` | ✅ added |

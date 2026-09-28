@@ -5770,7 +5770,8 @@ bool pci_dev_specific_ats_always_on(struct pci_dev *pdev)
 #endif /* CONFIG_PCI_ATS */
 
 /*
- * Pre-size ReBAR for NVIDIA GB202 (RTX 5090) and AD102 (RTX 4090)
+ * Pre-size ReBAR for NVIDIA GPUs, including GB202 (RTX 5090),
+ * GB203 (RTX 5070 Ti), and AD102 (RTX 4090),
  * so bridge sizing sees the full framebuffer aperture (BAR1).
  *
  * 7.0: pci_rebar_init() must be called explicitly before rebar functions.
@@ -5808,7 +5809,10 @@ DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2684, quirk_presize_rebar_nvidia
 DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2684, quirk_presize_rebar_nvidia_gb202);
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2b87, quirk_presize_rebar_nvidia_gb202);
 DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2b87, quirk_presize_rebar_nvidia_gb202);
-/* GB205 (RTX 5070 / 5070 Ti) */
+/* GB203 (RTX 5070 Ti): BAR1 supports up to index 14 (16 GiB). */
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2c05, quirk_presize_rebar_nvidia_gb202);
+DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2c05, quirk_presize_rebar_nvidia_gb202);
+/* Retain the existing GB20x device IDs. */
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2b89, quirk_presize_rebar_nvidia_gb202);
 DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2b89, quirk_presize_rebar_nvidia_gb202);
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2b8b, quirk_presize_rebar_nvidia_gb202);

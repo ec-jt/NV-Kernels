@@ -39,7 +39,7 @@
 unsigned int pci_flags;
 EXPORT_SYMBOL_GPL(pci_flags);
 
-/* Lab: identify target bridges — DMI Gigabyte + Switchtec subtree scan */
+/* Lab: identify target bridges by platform and downstream devices. */
 static bool lab_platform_ok(void)
 {
 #ifdef CONFIG_DMI
@@ -67,7 +67,7 @@ static bool bus_has_vendor_device(struct pci_bus *bus, u16 vendor, u16 device)
 	return false;
 }
 
-/* Target only AMD GPP RPs that front GPU/Switchtec fabric */
+/* Include directly attached GPUs as well as the Switchtec fabric. */
 static inline bool lab_bridge_target(struct pci_dev *dev)
 {
 	if (!dev)
@@ -77,10 +77,14 @@ static inline bool lab_bridge_target(struct pci_dev *dev)
 	if (!dev->subordinate)
 		return false;
 	if (!bus_has_vendor_device(dev->subordinate,
-				   PCI_VENDOR_ID_MICROSEMI, 0x4052))
+				   PCI_VENDOR_ID_MICROSEMI, 0x4052) &&
+	    !bus_has_vendor_device(dev->subordinate,
+				   PCI_VENDOR_ID_NVIDIA, 0x2b85) &&
+	    !bus_has_vendor_device(dev->subordinate,
+				   PCI_VENDOR_ID_NVIDIA, 0x2c05))
 		return false;
 
-	pci_info(dev, "LAB: targeting bridge %04x:%02x:%02x.%d (Switchtec subtree)\n",
+	pci_dbg(dev, "LAB: targeting bridge %04x:%02x:%02x.%d (GPU/Switchtec subtree)\n",
 		 pci_domain_nr(dev->bus), dev->bus->number,
 		 PCI_SLOT(dev->devfn), PCI_FUNC(dev->devfn));
 	return true;
@@ -96,11 +100,15 @@ static inline bool lab_bridge_target(struct pci_dev *dev)
 	*/
 static bool lab_np_floor_target(struct pci_dev *dev)
 {
+	if (!lab_platform_ok())
+		return false;
+
 	/* AMD GPP RPs that front a Switchtec subtree */
 	if (lab_bridge_target(dev))
 		return true;
 	/* Switchtec upstream and downstream ports */
-	if (dev && dev->vendor == PCI_VENDOR_ID_MICROSEMI) {
+	if (dev && dev->vendor == PCI_VENDOR_ID_MICROSEMI &&
+	    dev->device == 0x4052) {
 		u8 type = pci_pcie_type(dev);
 		if (type == PCI_EXP_TYPE_UPSTREAM ||
 		    type == PCI_EXP_TYPE_DOWNSTREAM)
@@ -1329,6 +1337,52 @@ static bool pbus_size_mem_optional(struct pci_dev *dev, int resno,
 	return true;
 }
 
+/*
+ * Compute a post-sizing floor in the same descending-alignment order used
+ * by the allocator. Bus enumeration order can put a small NIC window before
+ * a 64 MiB-aligned GPU window and unnecessarily exhaust 32-bit MMIO space.
+ * Keep optional ROM/VF resources and bridge growth out of the required floor.
+ */
+static void lab_bus_mem_floor(struct pci_bus *bus, struct resource *b_res,
+			      struct list_head *realloc_head,
+			      resource_size_t *required,
+			      resource_size_t *optional,
+			      resource_size_t *min_align,
+			      resource_size_t *add_align)
+{
+	struct pci_dev_resource *entry;
+	struct pci_dev *dev;
+	LIST_HEAD(resources);
+
+	list_for_each_entry(dev, &bus->devices, bus_list)
+		pdev_sort_resources(dev, &resources);
+
+	list_for_each_entry(entry, &resources, list) {
+		struct resource *r = entry->res;
+		resource_size_t align, size, extra = 0;
+		int idx = pci_resource_num(entry->dev, r);
+
+		if (pbus_select_window(bus, r) != b_res)
+			continue;
+
+		align = pci_resource_alignment(entry->dev, r);
+		size = resource_size(r);
+		if (realloc_head)
+			extra = get_res_add_size(realloc_head, r);
+		if (size + extra) {
+			*optional = ALIGN(*optional, align) + size + extra;
+			*add_align = max(*add_align, align);
+		}
+		if (!size || (realloc_head &&
+			      pci_resource_is_optional(entry->dev, idx)))
+			continue;
+
+		*required = ALIGN(*required, align) + size;
+		*min_align = max(*min_align, align);
+	}
+	pci_dev_res_free_list(&resources);
+}
+
 /**
  * pbus_size_mem() - Size the memory window of a given bus
  *
@@ -1366,32 +1420,11 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 			 pci_domain_nr(bus), bus->number,
 			 PCI_SLOT(bus->self->devfn), PCI_FUNC(bus->self->devfn));
 
-	/*
-	 * Lab override: release firmware-assigned NP MEM window on
-	 * lab bridges AND Switchtec ports so we can re-size it
-	 * (release BEFORE assigned check).  Switchtec windows also
-	 * get released here because a parent lab bridge may have
-	 * already released them via release_child_resources, and we
-	 * need to propagate the re-sizing.
-	 */
-	if (bus->self &&
-	    lab_np_floor_target(bus->self) &&
-	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW] &&
-	    resource_assigned(b_res)) {
-		pci_info(bus->self,
-			 "LAB|NP-REL: releasing firmware NP %pR size=%lluMiB\n",
-			 b_res,
-			 (unsigned long long)(resource_size(b_res) >> 20));
-		release_child_resources(b_res);
-		if (!release_resource(b_res))
-			pci_dbg(bus->self, "released existing window\n");
-	}
-
-	/* If resource is already assigned, nothing more to do */
+	/* Preserve working firmware windows; retry logic releases failed ones. */
 	if (resource_assigned(b_res)) {
 		if (bus->self)
-			pci_info(bus->self,
-				 "LAB|NP-SKIP: %pR already assigned, skipping\n",
+			pci_dbg(bus->self,
+				 "LAB|MEM-SKIP: %pR already assigned, skipping\n",
 				 b_res);
 		return;
 	}
@@ -1435,8 +1468,6 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 
 			r_size = resource_size(r);
 			size += max(r_size, align);
-				if (bus->self && lab_np_floor_target(bus->self) && b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW])
-					pci_info(bus->self, "LAB|NP-RES: %s %pR size=%lluMiB align=%lluMiB\n", r_name, r, (unsigned long long)(r_size >> 20), (unsigned long long)(align >> 20));
 
 			aligns[order] += align;
 			if (order > max_order)
@@ -1450,9 +1481,13 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 	size0 = calculate_memsize(size, realloc_head ? 0 : add_size,
 				  0, win_align);
 
-	/*
-	 * Lab override: enforce 96 MiB NP floor on lab bridges.
-	 */
+	if (realloc_head && (add_size > 0 || children_add_size > 0)) {
+		add_align = max(min_align, add_align);
+		size1 = calculate_memsize(size, add_size, children_add_size,
+					  win_align);
+	}
+
+	/* Keep the legacy 24 MiB NP minimum for unassigned lab windows. */
 	if (bus->self &&
 	    lab_np_floor_target(bus->self) &&
 	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW]) {
@@ -1471,139 +1506,29 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 			 (unsigned long long)(size >> 20));
 	}
 
-	/*
-	 * Lab override: alignment-aware NP floor for bridges in the
-	 * Switchtec subtree.  The standard size += max(r_size, align)
-	 * loop underestimates the NP window because it ignores
-	 * inter-child alignment gaps.  Walk child bridge NP windows
-	 * and compute sequential packing: ALIGN(floor, align) + size.
-	 *
-	 * Two 65 MiB child windows with 64 MiB alignment need
-	 * ~193 MiB, not 130 MiB.
-	 */
 	if (bus->self &&
-	    lab_np_floor_target(bus->self) &&
-	    b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW]) {
-		resource_size_t np_child_floor = 0;
-		struct pci_dev *child;
+	    ((lab_np_floor_target(bus->self) &&
+	      b_res == &bus->self->resource[PCI_BRIDGE_MEM_WINDOW]) ||
+	     (lab_bridge_target(bus->self) &&
+	      b_res == &bus->self->resource[PCI_BRIDGE_PREF_MEM_WINDOW]))) {
+		resource_size_t required = 0, optional = 0;
 
-		list_for_each_entry(child, &bus->devices, bus_list) {
-			struct resource *cr;
-			int j;
-
-			pci_dev_for_each_resource(child, cr, j) {
-				resource_size_t child_align, child_size;
-
-				/*
-				 * Pack child bridge NP windows AND endpoint
-				 * NP BARs.  The Switchtec MGMT endpoint
-				 * (11f8:4052, BAR0 4 MiB @ 4 MiB align) sits
-				 * NEXT TO the upstream port on the same bus;
-				 * packing only bridge windows starved its
-				 * BAR0 out of the parent window: 193 MiB
-				 * (64 MiB-aligned) child window + 4 MiB BAR
-				 * needs ALIGN(193M,4M)+4M = 200 MiB, not
-				 * 197 MiB ("can't assign; no space" and the
-				 * switchtec driver probe failed with -16,
-				 * killing the reboot-free GPU recovery path).
-				 */
-				if (!pci_resource_is_bridge_win(j) &&
-				    j >= PCI_STD_NUM_BARS)
-					continue;
-				if (cr->flags & IORESOURCE_PREFETCH)
-					continue;
-				if (!(cr->flags & IORESOURCE_MEM))
-					continue;
-				if (cr->flags & IORESOURCE_DISABLED)
-					continue;
-				child_align = pci_resource_alignment(child, cr);
-				child_size = resource_size(cr);
-				if (realloc_head)
-					child_size += get_res_add_size(realloc_head, cr);
-				if (!child_size || !child_align)
-					continue;
-				np_child_floor = ALIGN(np_child_floor, child_align) +
-						 child_size;
-			}
-		}
-
-		if (np_child_floor > 0) {
-			if (size0 < np_child_floor)
-				size0 = np_child_floor;
-			if (size1 < np_child_floor)
-				size1 = np_child_floor;
-			/* Update base size so size1 recalculation stays consistent */
-			if (size < np_child_floor)
-				size = np_child_floor;
-			add_align = max(add_align, min_align);
-			pci_info(bus->self,
-				 "NP child-align floor %llu MiB; sized %llu/%llu MiB\n",
-				 (unsigned long long)(np_child_floor >> 20),
-				 (unsigned long long)(size0 >> 20),
-				 (unsigned long long)(size1 >> 20));
-		}
-	}
-
-	/*
-	 * Lab override: enforce prefetchable window floor on lab bridges
-	 * to account for sibling alignment waste.  Two 32GB-aligned
-	 * GPU BAR1 apertures need sequential ALIGN to avoid cross-sibling
-	 * alignment collisions (e.g. ~96GB for two 32GB children).
-	 */
-	if (bus->self &&
-	    lab_bridge_target(bus->self) &&
-	    b_res == &bus->self->resource[PCI_BRIDGE_PREF_MEM_WINDOW]) {
-		resource_size_t pref_floor = 0;
-		struct pci_dev *child;
-
-		list_for_each_entry(child, &bus->devices, bus_list) {
-			struct resource *cr;
-			int j;
-
-			pci_dev_for_each_resource(child, cr, j) {
-				resource_size_t child_align, child_size;
-
-				if (!pci_resource_is_bridge_win(j))
-					continue;
-				if (!(cr->flags & IORESOURCE_PREFETCH))
-					continue;
-				if (cr->flags & IORESOURCE_DISABLED)
-					continue;
-				child_align = pci_resource_alignment(child, cr);
-				child_size = resource_size(cr);
-				if (realloc_head)
-					child_size += get_res_add_size(realloc_head, cr);
-				pref_floor = ALIGN(pref_floor, child_align) +
-					     child_size;
-			}
-		}
-
-		if (pref_floor > 0) {
-			if (size0 < pref_floor)
-				size0 = pref_floor;
-			if (size1 < pref_floor)
-				size1 = pref_floor;
-			/* Update base size so size1 recalculation stays consistent */
-			if (size < pref_floor)
-				size = pref_floor;
-			add_align = max(add_align, min_align);
-			pci_info(bus->self,
-				 "pref window floor %llu MiB; sized %llu/%llu MiB\n",
-				 (unsigned long long)(pref_floor >> 20),
-				 (unsigned long long)(size0 >> 20),
-				 (unsigned long long)(size1 >> 20));
-		}
+		lab_bus_mem_floor(bus, b_res, realloc_head, &required, &optional,
+				  &min_align, &add_align);
+		size0 = max(size0, ALIGN(required, win_align));
+		if (realloc_head)
+			size1 = max(size1, ALIGN(optional, win_align));
+		pci_info(bus->self,
+			 "LAB|MEM-FLOOR: %s required=%lluMiB optional=%lluMiB align=%lluMiB\n",
+			 b_res->flags & IORESOURCE_PREFETCH ? "PREF" : "NP",
+			 (unsigned long long)(size0 >> 20),
+			 (unsigned long long)(size1 >> 20),
+			 (unsigned long long)(min_align >> 20));
 	}
 
 	if (size0) {
 		resource_set_range(b_res, min_align, size0);
 		b_res->flags &= ~IORESOURCE_DISABLED;
-	}
-
-	if (realloc_head && (add_size > 0 || children_add_size > 0)) {
-		add_align = max(min_align, add_align);
-		size1 = calculate_memsize(size, add_size, children_add_size,
-					  win_align);
 	}
 
 	if (!size0 && !size1) {
@@ -2388,6 +2313,45 @@ static void pci_prepare_next_assign_round(struct list_head *fail_head,
 	pci_dev_res_free_list(fail_head);
 }
 
+/* Boot only: rebuild PREF windows before bottom-up sizing, not during it. */
+static int lab_release_rebar_windows(struct pci_dev *dev, void *data)
+{
+	struct resource *bar = &dev->resource[1];
+	struct pci_bus *bus, *top = NULL;
+	bool realloc_enabled = *(bool *)data;
+	unsigned long type = IORESOURCE_MEM | IORESOURCE_PREFETCH |
+			     IORESOURCE_MEM_64;
+
+	if (dev->vendor != PCI_VENDOR_ID_NVIDIA ||
+	    (dev->class >> 16) != PCI_BASE_CLASS_DISPLAY || !dev->rebar_cap ||
+	    (bar->flags & type) != type || resource_assigned(bar) ||
+	    resource_size(bar) <= SZ_256M)
+		return 0;
+
+	if (!realloc_enabled) {
+		pci_warn(dev,
+			 "LAB|REBAR: BAR1 unassigned; enable pci=realloc=on and remove pci=realloc=off\n");
+		return 0;
+	}
+
+	/* All ancestors must be able to forward the large 64-bit aperture. */
+	for (bus = dev->bus; bus->self; bus = bus->parent) {
+		if (!bus->self->pref_64_window)
+			return 0;
+		top = bus;
+	}
+	if (!top)
+		return 0;
+
+	pci_info(dev, "LAB|REBAR: rebuilding PREF hierarchy below %s for BAR1 %lluMiB\n",
+		 pci_name(top->self),
+		 (unsigned long long)(resource_size(bar) >> 20));
+	/* Include NIC siblings sharing this PREF hierarchy, but never NP or IO. */
+	pci_bus_release_bridge_resources(top,
+		&top->self->resource[PCI_BRIDGE_PREF_MEM_WINDOW], whole_subtree);
+	return 0;
+}
+
 /*
  * First try will not touch PCI bridge res.
  * Second and later try will clear small leaf bridge res.
@@ -2403,16 +2367,22 @@ void pci_assign_unassigned_root_bus_resources(struct pci_bus *bus)
 	LIST_HEAD(fail_head);
 	int pci_try_num = 1;
 	enum enable_type enable_local;
+	bool realloc_enabled;
 
 	/* Don't realloc if asked to do so */
 	enable_local = pci_realloc_detect(bus, pci_realloc_enable);
-	if (pci_realloc_enabled(enable_local)) {
+	realloc_enabled = pci_realloc_enabled(enable_local);
+	if (realloc_enabled) {
 		int max_depth = pci_bus_get_depth(bus);
 
 		pci_try_num = max_depth + 1;
 		dev_info(&bus->dev, "max bus depth: %d pci_try_num: %d\n",
 			 max_depth, pci_try_num);
 	}
+
+	if (system_state < SYSTEM_RUNNING && lab_platform_ok() &&
+	    !pci_find_host_bridge(bus)->preserve_config)
+		pci_walk_bus(bus, lab_release_rebar_windows, &realloc_enabled);
 
 	while (1) {
 		/*
