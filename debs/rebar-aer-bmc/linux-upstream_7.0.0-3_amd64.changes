@@ -1,0 +1,34 @@
+Format: 1.8
+Date: Thu, 05 Nov 2026 16:17:38 +0000
+Source: linux-upstream
+Binary: linux-headers-7.0.0-rebar-aer-bmc linux-image-7.0.0-rebar-aer-bmc linux-libc-dev
+Built-For-Profiles: noudeb pkg.linux-upstream.nokerneldbg
+Architecture: amd64
+Version: 7.0.0-3
+Distribution: noble
+Urgency: low
+Maintainer: ubuntu <ubuntu@server07-bir-kh.bir-kh.lan.danucore.com>
+Changed-By: ubuntu <ubuntu@server07-bir-kh.bir-kh.lan.danucore.com>
+Description:
+ linux-headers-7.0.0-rebar-aer-bmc - Linux kernel headers for 7.0.0-rebar-aer-bmc on amd64
+ linux-image-7.0.0-rebar-aer-bmc - Linux kernel, version 7.0.0-rebar-aer-bmc
+ linux-libc-dev - Linux support headers for userspace development
+Changes:
+ linux-upstream (7.0.0-3) noble; urgency=low
+ .
+   * Custom built Linux kernel.
+Checksums-Sha1:
+ cc81b777d6d84ce98846b5cd00c76b7c7995d544 10491892 linux-headers-7.0.0-rebar-aer-bmc_7.0.0-3_amd64.deb
+ e80f078147bbff99b1c39a245dae6cd95490dfca 103054552 linux-image-7.0.0-rebar-aer-bmc_7.0.0-3_amd64.deb
+ 1a91105250db3493e8bfeed3e8ebceb8fca0905c 1492364 linux-libc-dev_7.0.0-3_amd64.deb
+ d0f726ec4879a4ea512a9e944e81e690a926b750 8262 linux-upstream_7.0.0-3_amd64.buildinfo
+Checksums-Sha256:
+ 4cd50099a27df0e175b6c2efbb46834aeb2ea2f0328562826c8f7873d4d69699 10491892 linux-headers-7.0.0-rebar-aer-bmc_7.0.0-3_amd64.deb
+ 242103d969de4236a4e04ce1333a82098cea1880893151413fd6a7ca772c80b4 103054552 linux-image-7.0.0-rebar-aer-bmc_7.0.0-3_amd64.deb
+ cfacf1afd0cf4a2b92b85d0175f859e0486f66ad12dca2f321d2d031aa9bdca5 1492364 linux-libc-dev_7.0.0-3_amd64.deb
+ 32b6185ea07391f7a4ba5bf6ac06c40dee221d2c043c456da71316e7be65cea8 8262 linux-upstream_7.0.0-3_amd64.buildinfo
+Files:
+ eff864dc8b4cbdbcfd2992cea4e900d5 10491892 kernel optional linux-headers-7.0.0-rebar-aer-bmc_7.0.0-3_amd64.deb
+ c5c2b65924616fca773bc847a776e70c 103054552 kernel optional linux-image-7.0.0-rebar-aer-bmc_7.0.0-3_amd64.deb
+ 86980bcc2c2290939b7265c1fed002e8 1492364 devel optional linux-libc-dev_7.0.0-3_amd64.deb
+ b37fb283d9759085f821dda55235596d 8262 kernel optional linux-upstream_7.0.0-3_amd64.buildinfo
