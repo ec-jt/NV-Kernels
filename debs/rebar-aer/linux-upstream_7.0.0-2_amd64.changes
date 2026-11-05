@@ -1,0 +1,34 @@
+Format: 1.8
+Date: Thu, 05 Nov 2026 15:29:36 +0000
+Source: linux-upstream
+Binary: linux-headers-7.0.0-rebar-aer linux-image-7.0.0-rebar-aer linux-libc-dev
+Built-For-Profiles: noudeb pkg.linux-upstream.nokerneldbg
+Architecture: amd64
+Version: 7.0.0-2
+Distribution: noble
+Urgency: low
+Maintainer: ubuntu <ubuntu@server07-bir-kh.bir-kh.lan.danucore.com>
+Changed-By: ubuntu <ubuntu@server07-bir-kh.bir-kh.lan.danucore.com>
+Description:
+ linux-headers-7.0.0-rebar-aer - Linux kernel headers for 7.0.0-rebar-aer on amd64
+ linux-image-7.0.0-rebar-aer - Linux kernel, version 7.0.0-rebar-aer
+ linux-libc-dev - Linux support headers for userspace development
+Changes:
+ linux-upstream (7.0.0-2) noble; urgency=low
+ .
+   * Custom built Linux kernel.
+Checksums-Sha1:
+ 4e7fd3d1120c754bff5352c5b448bd126bfc992f 10491224 linux-headers-7.0.0-rebar-aer_7.0.0-2_amd64.deb
+ 60c090a3e68ac097a9fbc42f1a79d7389426e509 103070584 linux-image-7.0.0-rebar-aer_7.0.0-2_amd64.deb
+ dbc486c012ac3a28dfb97aaebe6d695c9b3fe4d3 1492192 linux-libc-dev_7.0.0-2_amd64.deb
+ 3eb02272ad8d577ac535be1b7249e03c31dde925 8226 linux-upstream_7.0.0-2_amd64.buildinfo
+Checksums-Sha256:
+ e628eda9035d3e46fd922e7a5173b2126abc897a72586e07c57d37bfdc13fe00 10491224 linux-headers-7.0.0-rebar-aer_7.0.0-2_amd64.deb
+ c568fbefd4b68da1804a7879eefcc95201e69caeddd8fab01debb4669b8a0810 103070584 linux-image-7.0.0-rebar-aer_7.0.0-2_amd64.deb
+ 5824cd266e8ef2dc99504033f509d7d194d8ab4e7b24ba894c076e8c976dfeed 1492192 linux-libc-dev_7.0.0-2_amd64.deb
+ a1afc9a9e01b823e42970586895b041aef02dfa4a25f3ae66708029d20a72c39 8226 linux-upstream_7.0.0-2_amd64.buildinfo
+Files:
+ 30fb2947a560bf6f4857e349c11053e3 10491224 kernel optional linux-headers-7.0.0-rebar-aer_7.0.0-2_amd64.deb
+ e99f260863ed5a38f4a6c7955ceeade3 103070584 kernel optional linux-image-7.0.0-rebar-aer_7.0.0-2_amd64.deb
+ 489bd088426b0d7444b01d2cd24b418c 1492192 devel optional linux-libc-dev_7.0.0-2_amd64.deb
+ c3228bf84ff191a20cfb7ea8834a9611 8226 kernel optional linux-upstream_7.0.0-2_amd64.buildinfo
