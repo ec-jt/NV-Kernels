@@ -1,7 +1,9 @@
 # NV-Kernels PCI lab maintenance guide
 
-Current work: fix/rebar-usb-bmc-console, based on rebar-mixed-5070ti-5090.
-Candidate kernel release: 7.0.0-rebar-usb-bmc-test1.
+Current work: rebar-aer, based on the validated USB/BMC and AER test commits.
+Release kernel: 7.0.0-rebar-aer.
+Use configs/config-7.0.0-rebar-aer for this release; see AER-TEST.md for the
+AER boot validation and remaining GPU root-port capability limitation.
 See [USB-BMC-CONSOLE.md](USB-BMC-CONSOLE.md) for scope and validation status.
 
 Read [REBAR-MIXED-TOPOLOGY.md](REBAR-MIXED-TOPOLOGY.md) before changing
