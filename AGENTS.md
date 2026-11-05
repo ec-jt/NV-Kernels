@@ -1,9 +1,11 @@
 # NV-Kernels PCI lab maintenance guide
 
-Current work: rebar-aer, based on the validated USB/BMC and AER test commits.
-Release kernel: 7.0.0-rebar-aer.
-Use configs/config-7.0.0-rebar-aer for this release; see AER-TEST.md for the
+Current work: rebar-aer-bmc, based on the validated USB/BMC and AER test commits.
+Release kernel: 7.0.0-rebar-aer-bmc.
+Use configs/config-7.0.0-rebar-aer-bmc for this release; see AER-TEST.md for the
 AER boot validation and remaining GPU root-port capability limitation.
+The optional upstream AER software injector is built as a module; it is not
+loaded by default. See AER-INJECTION-TEST.md for the corrected-event test.
 See [USB-BMC-CONSOLE.md](USB-BMC-CONSOLE.md) for scope and validation status.
 
 Read [REBAR-MIXED-TOPOLOGY.md](REBAR-MIXED-TOPOLOGY.md) before changing
