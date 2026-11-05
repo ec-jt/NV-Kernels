@@ -1,8 +1,8 @@
 # NV-Kernels PCI lab maintenance guide
 
-Current branch: rebar-mixed-5070ti-5090.
-Base branch: rebar-iommufd-btf-7.0.0.
-Kernel release: 7.0.0-rebar-mixed-5070ti-5090.
+Current work: fix/rebar-usb-bmc-console, based on rebar-mixed-5070ti-5090.
+Candidate kernel release: 7.0.0-rebar-usb-bmc-test1.
+See [USB-BMC-CONSOLE.md](USB-BMC-CONSOLE.md) for scope and validation status.
 
 Read [REBAR-MIXED-TOPOLOGY.md](REBAR-MIXED-TOPOLOGY.md) before changing
 [`drivers/pci/quirks.c`](drivers/pci/quirks.c) or
@@ -27,8 +27,9 @@ material, not a patch recipe or a statement of the current implementation.
   minimum remains. The primary upstream size accumulation is unchanged.
 - GPU branches are detected by their devices and ancestry, not fixed bus
   addresses or a fixed number of GPUs per switch.
-- The existing NP-relief quirks still disable selected USB and SATA
-  controllers. They are not DMI-gated and must not be broadened casually.
+- The NP-relief quirks retain their SATA entries. USB controllers are excluded
+  to preserve physical input and BMC virtual keyboard/mouse. The remaining
+  quirk is not DMI-gated and must not be broadened casually.
 
 ## Resource and recovery rules
 
@@ -58,14 +59,16 @@ material, not a patch recipe or a statement of the current implementation.
 | --- | --- | --- |
 | ASPEED BMC VGA | 1a03:2000 | Excluded, preserve console |
 | Switchtec management | 11f8:4052, memory-controller class | Excluded, preserve management |
-| ASM1042A xHCI | 1b21:1142 | Active |
-| AMD xHCI | 1022:148c | Active |
+| ASM1042A xHCI | 1b21:1142 | Excluded, preserve USB |
+| AMD xHCI | 1022:148c | Excluded, preserve USB |
 | AMD SATA AHCI | 1022:7901 | Active |
-| Other AHCI controllers | AHCI class wildcard | Active |
-| Other xHCI controllers | xHCI class wildcard | Active |
+| Other AHCI controllers | Legacy shifted class entry | Retained unchanged; not a valid generic AHCI match |
+| Other USB controllers | No match | Excluded, preserve USB |
 
-The USB/SATA wildcards are aggressive. Do not deploy without reviewing them
-if the system uses SATA root storage or requires USB input. NVMe is not matched.
+Do not deploy without reviewing the SATA entries if the system uses SATA root
+storage. The AHCI constant already includes the programming interface; its
+legacy extra shift is deliberately not corrected here, as that would disable
+additional storage controllers. NVMe is not matched.
 
 ## Configuration and boot parameters
 
@@ -99,6 +102,7 @@ installer and in-tree Mellanox network drivers.
 
 ```sh
 python3 tools/testing/selftests/pci/lab-rebar-test.py
+python3 tools/testing/selftests/pci/lab-console-test.py
 python3 tools/testing/selftests/pci/validate-rebar.py
 nvidia-smi --query-gpu=pci.bus_id,name,memory.total --format=csv
 nvidia-smi -q -d MEMORY

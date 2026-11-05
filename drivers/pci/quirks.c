@@ -5838,28 +5838,23 @@ DECLARE_PCI_FIXUP_RESUME_EARLY(PCI_VENDOR_ID_NVIDIA, 0x2bb3, quirk_presize_rebar
  * LAB: free 32-bit NP budget ASAP (EARLY + HEADER)
  *
  * Match table built from lspci -nnvv:
- *  - ASM1042A xHCI          [1b21:1142]
- *  - AMD xHCI               [1022:148c]   (class 0c0330)
  *  - Switchtec mgmt (mem)   [11f8:4052]   (class 0580)
  *  - AMD SATA AHCI          [1022:7901]   (class 0106)
  *  - ASPEED BMC VGA         [1a03:2000]
  *
- * Plus fallbacks for "any xHCI" and "any AHCI" by class.
+ * USB controllers must retain their BARs for local input and BMC virtual
+ * keyboard/mouse. Do not reclaim their resources for GPU allocations.
  */
 enum lab_dev_tag {
 	LAB_DEV_ANY = 0,
 	LAB_DEV_BMC_VGA_ASPEED,
-	LAB_DEV_USB_ASM1042A,
-	LAB_DEV_USB_XHCI_AMD,
 	LAB_DEV_SWITCHTEC_MGMT,
 	LAB_DEV_SATA_AHCI_AMD,
-	LAB_DEV_USB_XHCI_ANY,
 };
 static const struct pci_device_id lab_match_tbl[] = {
 	/* Preserve AST BMC VGA resources for the recovery console. */
 	/* { PCI_DEVICE(0x1a03,   0x2000), .driver_data = LAB_DEV_BMC_VGA_ASPEED }, */
-	{ PCI_DEVICE(PCI_VENDOR_ID_ASMEDIA,  0x1142), .driver_data = LAB_DEV_USB_ASM1042A },
-	{ PCI_DEVICE(PCI_VENDOR_ID_AMD,      0x148c), .driver_data = LAB_DEV_USB_XHCI_AMD },
+	/* Preserve all USB controllers, including 1b21:1142 and 1022:148c. */
 	/*
 	 * Preserve the Switchtec management endpoints (11f8:4052 class 0580).
 	 * BAR0 is the MRPC mailbox needed by the switchtec driver +
@@ -5876,8 +5871,6 @@ static const struct pci_device_id lab_match_tbl[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD,      0x7901), .driver_data = LAB_DEV_SATA_AHCI_AMD },
 	{ PCI_DEVICE_CLASS((PCI_CLASS_STORAGE_SATA_AHCI << 8), ~0),
 	  .driver_data = LAB_DEV_SATA_AHCI_AMD },
-	{ PCI_DEVICE_CLASS((PCI_CLASS_SERIAL_USB_XHCI << 8), ~0),
-	  .driver_data = LAB_DEV_USB_XHCI_ANY },
 	{ 0, }
 };
 
