@@ -216,6 +216,13 @@ Production hosts and the faulted `.122` have not been changed by this experiment
 
 ## Follow-up: power control and remaining recovery work
 
+**Failed recovery trial:** firmware port-unbind on the already-failed `.122`
+GPU port returned I/O error and made the entire switch branch inaccessible,
+including the neighbouring GPU. Do not use this as an isolated recovery
+procedure. See [SWITCHTEC-RECOVERY-122.md](SWITCHTEC-RECOVERY-122.md). This was
+on the old rebar-aer-bmc kernel and is distinct from the successful drained
+Linux slot-cycle tests of this release.
+
 Read-only investigation on the test host found Switchtec PFX Gen4 device
 0x4052, hardware REVB, firmware 3.50 B03E. GPU-facing ports report PwrCtrl-
 and HotPlug-. The upstream management utility at commit
