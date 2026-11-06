@@ -56,12 +56,76 @@ this firmware.** It affected the neighbouring GPU and made management
 unavailable. No new run of this experiment should happen without an out-of-band
 recovery path and all devices behind the switch drained.
 
-## Recovery status
+## Authorized recovery boot and hotplug validation
 
-Host-wide reboot requested from the user because it exceeds the targeted-port
-test and is needed to clear the unkillable driver thread and reinitialize the
-switch. Existing GRUB default verified as `7.0.0-rebar-aer-bmc`; no new boot
-target or kernel was installed. Recovery is pending approval/verification.
+The user subsequently authorized rebooting and changing the kernel. Installed
+image and headers `7.0.0-2+hotplug`, with a one-time GRUB entry selecting
+`7.0.0-hotplug`. The saved default remains `7.0.0-rebar-aer-bmc`. A synchronized,
+read-only-filesystem emergency reboot cleared the stuck modeset thread. SSH
+returned at approximately 12:46 UTC on 2026-11-06.
+
+The matching NVIDIA 615.78.08 and nvidia-fs 2.31.5 modules were copied from the
+validated `.107` build for the identical kernel. Their SHA256 hashes matched.
+615.78.08 user-space libraries were already installed; the NVIDIA runfile was
+not rerun. `/home/ubuntu/open-gpu-kernel-modules` on this host still contains
+610.43.02 source and local changes; it was preserved, not rebuilt over 615.
+
+Eight known GPU-facing ports were opted into polling pciehp:
+`03:00.0`, `03:01.0`, `42:00.0`, `42:01.0`, `87:00.0`, `87:01.0`,
+`c2:00.0`, and `c2:01.0`, all in domain 0000.
+
+The switch management endpoint and GPU 4 recovered. GPU 5 (`89:00.0`) did
+not enumerate. Its physical port 32 remains bound to logical port 2 but stays
+DOWN in `Polling (COMP)`. A warm reboot therefore did not restore its link.
+This does not identify which component has failed or prove loss of 12 V.
+
+NVIDIA modeset/DRM and GPU background services were held off. An additional
+Docker startup hook (`10-wait-gpu.conf`) repeatedly invoked `nvidia-smi` and
+autoloaded the compute modules despite the alias blacklist. Docker, its socket,
+and the decider updater were temporarily runtime-masked for the test. After
+removing those clients, `nvidia_uvm` and `nvidia` unloaded cleanly.
+
+Completed checks:
+
+| Test | Result |
+| --- | --- |
+| Quiesced logical remove/add, all seven responding GPUs | Passed; 2.29–4.03 s per cycle; all GPU BAR allocations and neighbour link widths/active states unchanged |
+| FLR of GPU 4 (`88:00.0`), NVIDIA unloaded | Passed, 0.112 s; BAR resources unchanged |
+| ReBAR allocation and ancestor forwarding | Passed on seven GPUs, each with 32 GiB BAR1 |
+| Bound-device removal guard | All seven rejected immediately with EBUSY; concurrent GPU 4 CUDA remained correct |
+| CUDA after module reload | Seven GPUs passed 32 MiB pattern/write/read checks; 26 iterations each over 3 s |
+| GDS after module reload | Seven GPUs passed synchronous NVFS reads with data verification and zero POSIX fallback |
+| Networking | Management Ethernet up; ConnectX-5 InfiniBand Active, LinkUp, 100 Gb/s with in-tree mlx5 |
+| IB headers metadata | `drivers/infiniband/core/Makefile` present in installed headers |
+
+An initial FLR test's cleanup rejected restoring the cached `flr bus` reset
+method list because the kernel no longer considered `bus` supported. The test
+was corrected to re-probe supported methods on EINVAL; the completed FLR and
+subsequent CUDA/GDS checks passed. No bridge reset was used.
+
+The OFED 25.10 external modules still have separate Linux 7 API incompatibilities.
+Candidate-specific DKMS exclusions were recorded under `/etc/dkms`; the inbox
+mlx5/IB stack is in use. `openibd.service` reports failure and must not be
+mistaken for a validated OFED installation.
+
+The successful headless tests do not fix NVIDIA's surprise-loss teardown. The
+615.78.08 modeset source still contains the unbounded `nvEvoMakeRoom` wait
+observed before the reboot. A simple timeout return would violate callers'
+assumption that push-buffer space is available; proper lost-device/error
+propagation is separate driver work. No driver-source patch was installed here.
+
+Remaining: obtain BMC access for a cold power-off/on trial of GPU 5, then
+physical inspection if its link stays down. No Switchtec firmware unbind,
+whole-switch reset, or undocumented GPIO write should be repeated. Physical
+powered replacement and automatic recovery from an in-use GPU loss remain
+unvalidated.
+
+Host left in the maintenance boot with compute modules and nvidia-fs loaded,
+seven GPUs capped at 400 W, and GPU jobs/startup services held off. Original
+autoload files are retained under `temporarily-disabled-autoload/`; original
+configuration backups are in the evidence directory. Restore deliberately
+after recovery testing, rather than restarting GPU workloads on the missing
+card's old index. GPU indices have changed; use UUID or PCI BDF.
 
 Evidence directory on the host: `/home/ubuntu/hotplug-recovery-20261106/`.
 Includes before/after kernel logs, port snapshots, binding information, the
