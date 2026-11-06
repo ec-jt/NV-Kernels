@@ -15,6 +15,7 @@
 #include <linux/aer.h>
 #include <linux/align.h>
 #include <linux/bitfield.h>
+#include <linux/hex.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/export.h>
@@ -36,6 +37,95 @@
 #include <linux/suspend.h>
 #include <linux/switchtec.h>
 #include "pci.h"
+
+/*
+ * Experimental software hotplug on explicitly selected G292-Z20 GPU ports.
+ * These ports do NOT advertise slot power control.  This opt-in permits
+ * pciehp removal/re-enumeration; it does not permit live physical replacement.
+ * Keep the allowlist outside initdata: HEADER fixups also run on rescans.
+ */
+#define LAB_SWITCHTEC_HP_MAX 16
+struct lab_switchtec_hp_address {
+	unsigned int domain, bus, slot, function;
+};
+static struct lab_switchtec_hp_address lab_switchtec_hp_ports[LAB_SWITCHTEC_HP_MAX];
+static unsigned int lab_switchtec_hp_count;
+static bool lab_switchtec_hp_invalid;
+
+static int __init lab_switchtec_hotplug_setup(char *str)
+{
+	struct lab_switchtec_hp_address parsed[LAB_SWITCHTEC_HP_MAX];
+	unsigned int count = 0, i;
+	char *entry;
+
+	/* A malformed or repeated option must never enable a partial list. */
+	if (lab_switchtec_hp_invalid || lab_switchtec_hp_count || !str || !*str)
+		goto invalid;
+	while ((entry = strsep(&str, ","))) {
+		struct lab_switchtec_hp_address *a;
+
+		if (count == LAB_SWITCHTEC_HP_MAX || strlen(entry) != 12 ||
+		    entry[4] != ':' || entry[7] != ':' || entry[10] != '.')
+			goto invalid;
+		for (i = 0; i < 12; i++)
+			if (i != 4 && i != 7 && i != 10 && hex_to_bin(entry[i]) < 0)
+				goto invalid;
+		a = &parsed[count];
+		if (sscanf(entry, "%4x:%2x:%2x.%1x", &a->domain, &a->bus,
+			   &a->slot, &a->function) != 4 || a->slot > 31 ||
+		    a->function > 7)
+			goto invalid;
+		for (i = 0; i < count; i++)
+			if (parsed[i].domain == a->domain && parsed[i].bus == a->bus &&
+			    parsed[i].slot == a->slot && parsed[i].function == a->function)
+				goto invalid;
+		count++;
+	}
+	memcpy(lab_switchtec_hp_ports, parsed, count * sizeof(parsed[0]));
+	lab_switchtec_hp_count = count;
+	return 1;
+invalid:
+	lab_switchtec_hp_count = 0;
+	lab_switchtec_hp_invalid = true;
+	pr_warn("LAB|HOTPLUG invalid/repeated allowlist; override disabled\n");
+	return 1;
+}
+__setup("lab_switchtec_hotplug=", lab_switchtec_hotplug_setup);
+
+static void quirk_lab_switchtec_hotplug(struct pci_dev *dev)
+{
+	u32 link_cap;
+	u16 flags;
+	unsigned int i;
+
+	if (!lab_switchtec_hp_count || lab_switchtec_hp_invalid ||
+	    !dmi_match(DMI_SYS_VENDOR, "GIGABYTE") ||
+	    !dmi_match(DMI_PRODUCT_NAME, "G292-Z20-00") ||
+	    !dmi_match(DMI_BOARD_NAME, "MZ22-G20-00") ||
+	    dev->vendor != 0x11f8 || dev->device != 0x4052 ||
+	    dev->class >> 8 != PCI_CLASS_BRIDGE_PCI ||
+	    !pci_is_pcie(dev) || pci_pcie_type(dev) != PCI_EXP_TYPE_DOWNSTREAM)
+		return;
+	for (i = 0; i < lab_switchtec_hp_count; i++) {
+		const struct lab_switchtec_hp_address *a = &lab_switchtec_hp_ports[i];
+
+		if ((int)a->domain == pci_domain_nr(dev->bus) && a->bus == dev->bus->number &&
+		    a->slot == PCI_SLOT(dev->devfn) && a->function == PCI_FUNC(dev->devfn))
+			break;
+	}
+	if (i == lab_switchtec_hp_count)
+		return;
+	if (pcie_capability_read_word(dev, PCI_EXP_FLAGS, &flags) ||
+	    pcie_capability_read_dword(dev, PCI_EXP_LNKCAP, &link_cap) ||
+	    !(flags & PCI_EXP_FLAGS_SLOT) || !(link_cap & PCI_EXP_LNKCAP_DLLLARC)) {
+		pci_warn(dev, "LAB|HOTPLUG missing slot/link reporting; override refused\n");
+		return;
+	}
+	dev->is_hotplug_bridge = 1;
+	dev->is_pciehp = 1;
+	pci_warn(dev, "LAB|HOTPLUG experimental pciehp opt-in; no physical hot-swap guarantee\n");
+}
+DECLARE_PCI_FIXUP_HEADER(0x11f8, 0x4052, quirk_lab_switchtec_hotplug);
 
 static bool pcie_lbms_seen(struct pci_dev *dev, u16 lnksta)
 {

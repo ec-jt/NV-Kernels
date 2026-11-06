@@ -59,7 +59,7 @@ static inline int pciehp_request_irq(struct controller *ctrl)
 {
 	int retval, irq = ctrl->pcie->irq;
 
-	if (pciehp_poll_mode) {
+	if (ctrl->poll_mode) {
 		ctrl->poll_thread = kthread_run(&pciehp_poll, ctrl,
 						"pciehp_poll-%s",
 						slot_name(ctrl));
@@ -77,7 +77,7 @@ static inline int pciehp_request_irq(struct controller *ctrl)
 
 static inline void pciehp_free_irq(struct controller *ctrl)
 {
-	if (pciehp_poll_mode)
+	if (ctrl->poll_mode)
 		kthread_stop(ctrl->poll_thread);
 	else
 		free_irq(ctrl->pcie->irq, ctrl);
@@ -111,7 +111,7 @@ static int pcie_poll_cmd(struct controller *ctrl, int timeout)
 
 static void pcie_wait_cmd(struct controller *ctrl)
 {
-	unsigned int msecs = pciehp_poll_mode ? 2500 : 1000;
+	unsigned int msecs = ctrl->poll_mode ? 2500 : 1000;
 	unsigned long duration = msecs_to_jiffies(msecs);
 	unsigned long cmd_timeout = ctrl->cmd_started + duration;
 	unsigned long now, timeout;
@@ -604,7 +604,7 @@ static void pciehp_ignore_link_change(struct controller *ctrl,
 	 */
 	synchronize_hardirq(irq);
 	atomic_and(~ignored_events, &ctrl->pending_events);
-	if (pciehp_poll_mode)
+	if (ctrl->poll_mode)
 		pcie_capability_write_word(pdev, PCI_EXP_SLTSTA,
 					   ignored_events);
 	ctrl_info(ctrl, "Slot(%s): Link Down/Up ignored\n", slot_name(ctrl));
@@ -632,7 +632,7 @@ static irqreturn_t pciehp_isr(int irq, void *dev_id)
 	 * in the Slot Control register (PCIe r4.0, sec 6.7.3.4).
 	 */
 	if (pdev->current_state == PCI_D3cold ||
-	    (!(ctrl->slot_ctrl & PCI_EXP_SLTCTL_HPIE) && !pciehp_poll_mode))
+	    (!(ctrl->slot_ctrl & PCI_EXP_SLTCTL_HPIE) && !ctrl->poll_mode))
 		return IRQ_NONE;
 
 	/*
@@ -692,7 +692,7 @@ read_status:
 		 * So re-read the Slot Status register in case a bit was set
 		 * between read and write.
 		 */
-		if (pci_dev_msi_enabled(pdev) && !pciehp_poll_mode)
+		if (pci_dev_msi_enabled(pdev) && !ctrl->poll_mode)
 			goto read_status;
 	}
 
@@ -843,9 +843,9 @@ static void pcie_enable_notification(struct controller *ctrl)
 		cmd |= PCI_EXP_SLTCTL_ABPE;
 	else
 		cmd |= PCI_EXP_SLTCTL_PDCE;
-	if (!pciehp_poll_mode)
+	if (!ctrl->poll_mode)
 		cmd |= PCI_EXP_SLTCTL_HPIE;
-	if (!pciehp_poll_mode && !NO_CMD_CMPL(ctrl))
+	if (!ctrl->poll_mode && !NO_CMD_CMPL(ctrl))
 		cmd |= PCI_EXP_SLTCTL_CCIE;
 
 	mask = (PCI_EXP_SLTCTL_PDCE | PCI_EXP_SLTCTL_ABPE |
@@ -882,7 +882,7 @@ void pcie_enable_interrupt(struct controller *ctrl)
 	u16 mask;
 
 	mask = PCI_EXP_SLTCTL_DLLSCE;
-	if (!pciehp_poll_mode)
+	if (!ctrl->poll_mode)
 		mask |= PCI_EXP_SLTCTL_HPIE;
 	pcie_write_cmd(ctrl, mask, mask);
 }
@@ -1030,6 +1030,10 @@ struct controller *pcie_init(struct pcie_device *dev)
 		slot_cap |= PCI_EXP_SLTCAP_NCCS;
 
 	ctrl->slot_cap = slot_cap;
+	/* Opted-in non-HPC ports may ignore Hot-Plug Interrupt Enable. */
+	ctrl->poll_mode = pciehp_poll_mode || !(slot_cap & PCI_EXP_SLTCAP_HPC);
+	if (ctrl->poll_mode && !pciehp_poll_mode)
+		ctrl_info(ctrl, "Polling hotplug events on non-HPC port\n");
 	mutex_init(&ctrl->ctrl_lock);
 	mutex_init(&ctrl->state_lock);
 	init_rwsem(&ctrl->reset_lock);

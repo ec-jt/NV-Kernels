@@ -31,6 +31,33 @@
 #define SAFE_REMOVAL	 true
 #define SURPRISE_REMOVAL false
 
+/*
+ * Software-enabled non-HPC GPU ports are a maintenance interface, not a
+ * promise that the attached driver tolerates surprise removal.  In testing,
+ * NVIDIA removal waited indefinitely for references held by other GPUs.
+ * Keep ordinary HPC slots unchanged and require GPU drivers to be unbound
+ * before either requested or event-driven teardown on the experimental ports.
+ * Users must also prevent new driver binds/jobs during maintenance.
+ */
+static bool pciehp_non_hpc_gpu_bound(struct controller *ctrl)
+{
+	struct pci_dev *dev;
+	bool bound = false;
+
+	if (ctrl->slot_cap & PCI_EXP_SLTCAP_HPC)
+		return false;
+	down_read(&pci_bus_sem);
+	list_for_each_entry(dev, &ctrl->pcie->port->subordinate->devices, bus_list) {
+		if (dev->class >> 16 == PCI_BASE_CLASS_DISPLAY &&
+		    READ_ONCE(dev->driver)) {
+			bound = true;
+			break;
+		}
+	}
+	up_read(&pci_bus_sem);
+	return bound;
+}
+
 static void set_slot_off(struct controller *ctrl)
 {
 	/*
@@ -141,7 +168,7 @@ static int pciehp_disable_slot(struct controller *ctrl, bool safe_removal);
 void pciehp_request(struct controller *ctrl, int action)
 {
 	atomic_or(action, &ctrl->pending_events);
-	if (!pciehp_poll_mode)
+	if (!ctrl->poll_mode)
 		irq_wake_thread(ctrl->pcie->irq, ctrl);
 }
 
@@ -216,6 +243,10 @@ void pciehp_handle_button_press(struct controller *ctrl)
 
 void pciehp_handle_disable_request(struct controller *ctrl)
 {
+	if (pciehp_non_hpc_gpu_bound(ctrl)) {
+		ctrl->request_result = -EBUSY;
+		return;
+	}
 	mutex_lock(&ctrl->state_lock);
 	switch (ctrl->state) {
 	case BLINKINGON_STATE:
@@ -232,6 +263,12 @@ void pciehp_handle_disable_request(struct controller *ctrl)
 void pciehp_handle_presence_or_link_change(struct controller *ctrl, u32 events)
 {
 	int present, link_active;
+
+	if (pciehp_non_hpc_gpu_bound(ctrl)) {
+		dev_warn_ratelimited(&ctrl->pcie->port->dev,
+			"Non-HPC slot event deferred: drain jobs and unbind GPU driver before hotplug\n");
+		return;
+	}
 
 	/*
 	 * If the slot is on and presence or link has changed, turn it off.
@@ -432,6 +469,9 @@ int pciehp_sysfs_enable_slot(struct hotplug_slot *hotplug_slot)
 int pciehp_sysfs_disable_slot(struct hotplug_slot *hotplug_slot)
 {
 	struct controller *ctrl = to_ctrl(hotplug_slot);
+
+	if (pciehp_non_hpc_gpu_bound(ctrl))
+		return -EBUSY;
 
 	mutex_lock(&ctrl->state_lock);
 	switch (ctrl->state) {

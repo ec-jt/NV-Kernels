@@ -65,10 +65,11 @@ extern int pciehp_poll_time;
  * @pending_events: used by the IRQ handler to save events retrieved from the
  *	Slot Status register for later consumption by the IRQ thread
  * @notification_enabled: whether the IRQ was requested successfully
+ * @poll_mode: polling selected at initialization, including non-HPC ports
  * @power_fault_detected: whether a power fault was detected by the hardware
  *	that has not yet been cleared by the user
  * @poll_thread: thread to poll for slot events if no IRQ is available,
- *	enabled with pciehp_poll_mode module parameter
+ *	enabled with pciehp_poll_mode or for opted-in non-HPC ports
  * @state: current state machine position
  * @state_lock: protects reads and writes of @state;
  *	protects scheduling, execution and cancellation of @button_work
@@ -103,6 +104,7 @@ struct controller {
 
 	atomic_t pending_events;		/* event handling */
 	unsigned int notification_enabled:1;
+	unsigned int poll_mode:1;
 	unsigned int power_fault_detected;
 	struct task_struct *poll_thread;
 

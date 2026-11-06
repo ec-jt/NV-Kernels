@@ -20,6 +20,9 @@ mkdir -p "${destdir}"
 (
 	cd "${srctree}"
 	echo Makefile
+	# OFED probes this source Makefile to detect legacy standalone ib_sa
+	# modules.  It is metadata, not a request to build the in-tree IB stack.
+	echo drivers/infiniband/core/Makefile
 	find "arch/${SRCARCH}" -maxdepth 1 -name 'Makefile*'
 	find "arch/${SRCARCH}" -name generated -prune -o -name include -type d -print
 	find "arch/${SRCARCH}" -name Kbuild.platforms -o -name Platform

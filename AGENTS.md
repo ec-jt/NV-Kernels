@@ -2,6 +2,10 @@
 
 Current work: rebar-aer-bmc, based on the validated USB/BMC and AER test commits.
 Release kernel: 7.0.0-rebar-aer-bmc.
+The opt-in Switchtec hotplug experiment is documented in
+[SWITCHTEC-HOTPLUG.md](SWITCHTEC-HOTPLUG.md). It must not be enabled globally
+or treated as permission for powered physical GPU replacement. Retain the
+released kernel as the default during candidate testing.
 Use configs/config-7.0.0-rebar-aer-bmc for this release; see AER-TEST.md for the
 AER boot validation and remaining GPU root-port capability limitation.
 The optional upstream AER software injector is built as a module; it is not
