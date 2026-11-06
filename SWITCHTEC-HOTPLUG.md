@@ -206,7 +206,55 @@ under `validation-single/`. Matching NVIDIA 615.78.08 and nvidia-fs 2.31.5
 modules are installed for this kernel on the test host; they are not embedded
 in the generic kernel Debian packages.
 
-This is an experimental candidate, not a published replacement for the
-rebar-aer-bmc release. The test host is running it through a one-time GRUB
-entry; its persistent default remains `7.0.0-rebar-aer-bmc`. Production hosts
-and the faulted `.122` have not been changed by this experiment.
+Published as the experimental pre-release
+[hotplug-7.0.0](https://github.com/ec-jt/NV-Kernels/releases/tag/hotplug-7.0.0),
+from source commit `acdfeb600e3b4255a87ad08b06b532dbbf1efbc8`. GitHub's asset
+SHA-256 digests match the locally verified packages above. This does not
+replace the stable rebar-aer-bmc release. The test host is running it through
+a one-time GRUB entry; its persistent default remains `7.0.0-rebar-aer-bmc`.
+Production hosts and the faulted `.122` have not been changed by this experiment.
+
+## Follow-up: power control and remaining recovery work
+
+Read-only investigation on the test host found Switchtec PFX Gen4 device
+0x4052, hardware REVB, firmware 3.50 B03E. GPU-facing ports report PwrCtrl-
+and HotPlug-. The upstream management utility at commit
+`99da3bc799b84ff53abc726c2fdea01379b3c687` can read GPIO status, but its topology
+command that labels Power Controller/DSP PERST signals belongs to the PAX
+fabric extension. No documented PFX GPIO-to-GPU power mapping was established.
+No GPIO values, switch firmware, or BMC power controls were changed.
+
+BMC firmware 12.61 exposes 12V_GPU current sensors. Their presence does not
+establish a switching circuit, and their zero-amp readings must not be treated
+as evidence that these operating GPUs have no power. The G292-Z20 vendor
+manual, page 33, requires shutdown and disconnection of all power sources for
+GPU installation. Its public cable-routing diagrams do not establish a
+per-GPU power-cycle interface.
+
+PCIe link disable, FLR, downstream bus reset, PERST assertion and physical
+power isolation are different operations. The tested FLR/logical cycle can
+recover a responsive, quiesced endpoint. None proves that the chassis can
+remove the GPU's slot supplies and auxiliary 12 V. Even a switch chip with
+hotplug control logic needs the board's power-switching circuitry wired and
+configured; a software capability override cannot create it.
+
+Next development gates:
+
+1. Obtain the exact GPU riser/power-board schematic or a vendor-supported
+   control mapping covering slot 12 V, 3.3 V/auxiliary supplies, GPU auxiliary
+   12 V, reset sequencing and power-good feedback. Generic GPIO writes and
+   undocumented IPMI commands are not a valid discovery method.
+2. Trace NVIDIA's residual usage_count separately in an instrumented test
+   driver. Its nv_pci_remove_helper() deliberately waits when an internal GPU
+   still has references; removing the wait or zeroing the counter risks
+   corrupting state. Test CUDA/UVM, peer mappings, DMA-BUF and NVFS registration
+   teardown individually before attempting faulted-driver removal again.
+3. Only after both gates pass, test controlled loss/recovery on one idle port,
+   verify neighbour DMA isolation and resource forwarding, then test workloads
+   with explicit failure/restart semantics. Running CUDA state is not preserved
+   across a reset. Do not enable an automatic switch-reset watchdog meanwhile.
+
+Sources:
+- [G292-Z20/Z22 vendor manual](https://download.gigabyte.com/FileList/Manual/server_system_manual_G292-Z20_Z22_e_A00.pdf), pages 33 and 47–50.
+- [Upstream Switchtec management utility](https://github.com/Microsemi/switchtec-user), cli/fabric.c and cli/main.c.
+- [Microchip slot power-controller example](https://www.microchip.com/content/dam/mchp/documents/OTH/ProductDocuments/DataSheets/mic2591b.pdf): external power switching, current limiting and rail supervision are separate from PCIe packet routing. This example is not evidence that this controller is fitted in the G292-Z20.
