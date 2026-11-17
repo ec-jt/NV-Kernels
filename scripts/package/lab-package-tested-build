@@ -1,0 +1,67 @@
+#!/bin/bash
+# Package an already-built, boot-tested x86 kernel without relinking it.
+# Usage: lab-package-tested-build SOURCE BUILD OUTPUT DEBIAN_VERSION
+set -euo pipefail
+src=$(realpath "$1")
+build=$(realpath "$2")
+mkdir -p "$3"
+out=$(realpath "$3")
+version=$4
+release=$(cat "$build/include/config/kernel.release")
+[[ "$release" =~ ^[0-9][A-Za-z0-9.+-]+$ ]]
+[[ "$version" =~ ^[0-9][A-Za-z0-9.+~-]+$ ]]
+test -f "$build/arch/x86/boot/bzImage"
+test -f "$build/Module.symvers"
+before=$(sha256sum "$build/arch/x86/boot/bzImage" | cut -d' ' -f1)
+export KBUILD_DEBARCH=amd64 DEB_HOST_GNU_TYPE=x86_64-linux-gnu
+export DEB_HOST_MULTIARCH=x86_64-linux-gnu
+export KCONFIG_CONFIG=.config
+for package in "linux-image-$release" "linux-headers-$release" linux-libc-dev; do
+    test ! -e "$build/debian/$package"
+    make -C "$src" O="$build" CC=gcc-12 HOSTCC=x86_64-linux-gnu-gcc \
+        LOCALVERSION= KERNELRELEASE="$release" run-command \
+        KBUILD_RUN_COMMAND="'$src/scripts/package/builddeb' $package"
+    stage="$build/debian/$package"
+    mkdir -p "$stage/DEBIAN" "$stage/usr/share/doc/$package"
+    cp "$src/COPYING" "$stage/usr/share/doc/$package/copyright"
+    description="Tested Linux $release build"
+    deps=""
+    if [[ "$package" == linux-image-* ]]; then
+        deps="Depends: kmod, initramfs-tools | linux-initramfs-tool"
+        cmp "$build/arch/x86/boot/bzImage" "$stage/boot/vmlinuz-$release"
+    elif [[ "$package" == linux-headers-* ]]; then
+        deps="Depends: libc6 (>= 2.35), libelf1 | libelf1t64, libssl3 | libssl3t64, zlib1g, libzstd1"
+        headers="$stage/usr/src/linux-headers-$release"
+        cp "$build/.config" "$headers/.config"
+        test -f "$headers/drivers/infiniband/core/Makefile"
+        # Some external builds require the source link as well as build.
+        ln -s "/usr/src/linux-headers-$release" "$stage/lib/modules/$release/source"
+    else
+        description="Linux userspace development headers"
+    fi
+    cat >"$stage/DEBIAN/control" <<EOF
+Package: $package
+Version: $version
+Section: kernel
+Priority: optional
+Architecture: amd64
+Maintainer: James Trappett <james@danucore.com>
+Installed-Size: $(du -sk "$stage" | cut -f1)
+${deps:+$deps}
+Description: $description
+ Experimental lab kernel; preserve a known-working fallback.
+EOF
+    # A blank dependency line would terminate the control paragraph.
+    sed -i '/^$/d' "$stage/DEBIAN/control"
+    if [[ "$package" == linux-libc-dev ]]; then
+        printf 'Multi-Arch: same\nProvides: linux-kernel-headers\n' >>"$stage/DEBIAN/control"
+    fi
+    (cd "$stage" && find . -type f ! -path './DEBIAN/*' -print0 | \
+        sort -z | xargs -0 md5sum >DEBIAN/md5sums)
+    dpkg-deb --root-owner-group -Zxz -z6 --build "$stage" \
+        "$out/${package}_${version}_amd64.deb"
+done
+after=$(sha256sum "$build/arch/x86/boot/bzImage" | cut -d' ' -f1)
+test "$before" = "$after"
+printf '%s  vmlinuz-%s\n' "$after" "$release" >"$out/TESTED-KERNEL-SHA256"
+(cd "$out" && sha256sum ./*.deb >SHA256SUMS)

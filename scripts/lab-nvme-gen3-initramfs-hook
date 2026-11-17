@@ -1,0 +1,7 @@
+#!/bin/sh
+# Include the PCI configuration utility used by lab-nvme-gen3-initramfs.
+set -e
+PREREQ=""
+case "${1:-}" in prereqs) echo "$PREREQ"; exit 0;; esac
+. /usr/share/initramfs-tools/hook-functions
+copy_exec /usr/bin/setpci /sbin/setpci
