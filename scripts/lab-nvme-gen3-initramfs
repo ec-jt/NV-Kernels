@@ -1,0 +1,70 @@
+#!/bin/sh
+# Runs before initramfs udev and before NVMe drivers can mount the root disk.
+PREREQ=""
+case "$1" in prereqs) echo "$PREREQ"; exit 0;; esac
+# Explicit opt-in, independent of kernel release. Last occurrence wins.
+# Absent, zero, and invalid values perform no hardware operations.
+set -f
+enabled=0
+for arg in $(cat /proc/cmdline); do
+    case "$arg" in lab_nvme_gen3=*) enabled=${arg#lab_nvme_gen3=};; esac
+done
+set +f
+[ "$enabled" = "1" ] || exit 0
+[ "$(cat /sys/class/dmi/id/product_name 2>/dev/null)" = "G292-Z20-00" ] || exit 0
+log() { echo "LAB_NVME_GEN3: $*" > /dev/kmsg; }
+log "begin before storage driver loading"
+for dev in /sys/bus/pci/devices/*; do
+    [ "$(cat "$dev/class" 2>/dev/null)" = "0x010802" ] || continue
+    bdf=${dev##*/}
+    # Never retrain an active storage controller from this boot helper.
+    if [ -e "$dev/driver" ]; then log "$bdf SKIP driver already bound"; continue; fi
+    parent=$(dirname "$(readlink -f "$dev")")
+    port=${parent##*/}
+    case "$port" in ????:??:??.?) ;; *) log "$bdf SKIP no PCIe parent"; continue;; esac
+    [ "$(cat "$parent/class" 2>/dev/null)" = "0x060400" ] || continue
+    exclusive=1
+    for child in "$parent"/????:??:??.?; do
+        [ -e "$child/class" ] || continue
+        [ "$(cat "$child/class")" = "0x010802" ] || exclusive=0
+        [ ! -e "$child/driver" ] || exclusive=0
+    done
+    [ "$exclusive" -eq 1 ] || { log "$bdf SKIP shared or bound parent link"; continue; }
+    # The parent must own a dedicated point-to-point PCIe endpoint link.
+    cap=$(/sbin/setpci -s "$port" CAP_EXP+02.w 2>/dev/null) || continue
+    case "$cap" in ''|ffff|*[!0-9a-fA-F]*) continue;; esac
+    type=$(( (0x$cap >> 4) & 15 ))
+    [ "$type" -eq 4 ] || [ "$type" -eq 6 ] || continue
+    ctl=$(/sbin/setpci -s "$port" CAP_EXP+30.w 2>/dev/null) || continue
+    sta=$(/sbin/setpci -s "$port" CAP_EXP+12.w 2>/dev/null) || continue
+    case "$ctl:$sta" in *ffff*|*[!0-9a-fA-F:]*) continue;; esac
+    old=$((0x$ctl & 15)); current=$((0x$sta & 15))
+    if [ "$old" -le 3 ] && [ "$current" -le 3 ]; then
+        log "$bdf parent=$port already at or below Gen3"; continue
+    fi
+    if ! /sbin/setpci -s "$port" CAP_EXP+30.w=0003:000f; then
+        log "$bdf ERROR cannot set target"; continue
+    fi
+    if [ "$current" -gt 3 ]; then
+        /sbin/setpci -s "$port" CAP_EXP+10.w=0020:0020 || log "$bdf ERROR retrain request"
+    fi
+    n=0; good=0
+    while [ "$n" -lt 50 ]; do
+        sleep 0.1
+        sta=$(/sbin/setpci -s "$port" CAP_EXP+12.w 2>/dev/null) || break
+        case "$sta" in ''|ffff|*[!0-9a-fA-F]*) break;; esac
+        gen=$((0x$sta & 15)); width=$(((0x$sta >> 4) & 63)); train=$((0x$sta & 2048))
+        if [ "$gen" -le 3 ] && [ "$gen" -gt 0 ] && [ "$width" -gt 0 ] && [ "$train" -eq 0 ]; then good=1; break; fi
+        n=$((n+1))
+    done
+    if [ "$good" -eq 1 ]; then
+        log "$bdf parent=$port capped Gen3 negotiated Gen$gen x$width"
+    else
+        # One restoration attempt, then let the normal storage driver decide.
+        /sbin/setpci -s "$port" "CAP_EXP+30.w=$ctl:000f" || true
+        /sbin/setpci -s "$port" CAP_EXP+10.w=0020:0020 || true
+        log "$bdf ERROR training failed; restored previous target=$old"
+    fi
+done
+log "complete"
+exit 0
