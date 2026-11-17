@@ -937,14 +937,23 @@ static void sriov_restore_vf_rebar_state(struct pci_dev *dev)
 	if (!pos)
 		return;
 
-	pci_read_config_dword(dev, pos + PCI_VF_REBAR_CTRL, &ctrl);
+	if (pci_read_config_dword(dev, pos + PCI_VF_REBAR_CTRL, &ctrl) ||
+	    PCI_POSSIBLE_ERROR(ctrl))
+		return;
 	nbars = FIELD_GET(PCI_VF_REBAR_CTRL_NBAR_MASK, ctrl);
+	if (nbars > PCI_SRIOV_NUM_BARS)
+		return;
 
 	for (i = 0; i < nbars; i++, pos += 8) {
 		int bar_idx, size;
 
-		pci_read_config_dword(dev, pos + PCI_VF_REBAR_CTRL, &ctrl);
+		if (pci_read_config_dword(dev, pos + PCI_VF_REBAR_CTRL, &ctrl) ||
+		    PCI_POSSIBLE_ERROR(ctrl))
+			return;
 		bar_idx = FIELD_GET(PCI_VF_REBAR_CTRL_BAR_IDX, ctrl);
+		/* A reset may leave the endpoint temporarily inaccessible. */
+		if (bar_idx >= PCI_SRIOV_NUM_BARS || !dev->sriov->barsz[bar_idx])
+			continue;
 		size = pci_rebar_bytes_to_size(dev->sriov->barsz[bar_idx]);
 		ctrl &= ~PCI_VF_REBAR_CTRL_BAR_SIZE;
 		ctrl |= FIELD_PREP(PCI_VF_REBAR_CTRL_BAR_SIZE, size);

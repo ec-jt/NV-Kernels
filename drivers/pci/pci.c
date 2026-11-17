@@ -5683,6 +5683,19 @@ int pci_probe_reset_bus(struct pci_bus *bus)
 }
 EXPORT_SYMBOL_GPL(pci_probe_reset_bus);
 
+static void pci_bus_mark_reset_links(struct pci_bus *bus, bool changing)
+{
+	struct pci_dev *dev;
+
+	if (changing)
+		pci_hp_ignore_link_change(bus->self);
+	list_for_each_entry(dev, &bus->devices, bus_list)
+		if (dev->subordinate)
+			pci_bus_mark_reset_links(dev->subordinate, changing);
+	if (!changing)
+		pci_hp_unignore_link_change(bus->self);
+}
+
 /**
  * __pci_reset_bus - Try to reset a PCI bus
  * @bus: top level PCI bus to reset
@@ -5698,10 +5711,13 @@ int __pci_reset_bus(struct pci_bus *bus)
 		return rc;
 
 	if (pci_bus_trylock(bus)) {
+		/* Keep pciehp from removing devices during reset and BAR restore. */
+		pci_bus_mark_reset_links(bus, true);
 		pci_bus_save_and_disable_locked(bus);
 		might_sleep();
 		rc = pci_bridge_secondary_bus_reset(bus->self);
 		pci_bus_restore_locked(bus);
+		pci_bus_mark_reset_links(bus, false);
 		pci_bus_unlock(bus);
 	} else
 		rc = -EAGAIN;

@@ -230,16 +230,26 @@ void pci_restore_rebar_state(struct pci_dev *pdev)
 	if (!pos)
 		return;
 
-	pci_read_config_dword(pdev, pos + PCI_REBAR_CTRL, &ctrl);
+	if (pci_read_config_dword(pdev, pos + PCI_REBAR_CTRL, &ctrl) ||
+	    PCI_POSSIBLE_ERROR(ctrl))
+		return;
 	nbars = FIELD_GET(PCI_REBAR_CTRL_NBAR_MASK, ctrl);
+	if (nbars > PCI_STD_NUM_BARS)
+		return;
 
 	for (i = 0; i < nbars; i++, pos += 8) {
 		struct resource *res;
 		int bar_idx, size;
 
-		pci_read_config_dword(pdev, pos + PCI_REBAR_CTRL, &ctrl);
+		if (pci_read_config_dword(pdev, pos + PCI_REBAR_CTRL, &ctrl) ||
+		    PCI_POSSIBLE_ERROR(ctrl))
+			return;
 		bar_idx = ctrl & PCI_REBAR_CTRL_BAR_IDX;
+		if (bar_idx >= PCI_STD_NUM_BARS)
+			continue;
 		res = pci_resource_n(pdev, bar_idx);
+		if (!(res->flags & IORESOURCE_MEM) || !resource_size(res))
+			continue;
 		size = pci_rebar_bytes_to_size(resource_size(res));
 		ctrl &= ~PCI_REBAR_CTRL_BAR_SIZE;
 		ctrl |= FIELD_PREP(PCI_REBAR_CTRL_BAR_SIZE, size);
